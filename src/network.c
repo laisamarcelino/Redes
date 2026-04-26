@@ -4,12 +4,16 @@
 #include <errno.h>
 #include <string.h>
 
+// Escolhe uma interface de rede para usar.
+// Primeiro tenta uma interface "normal" (não loopback).
+// Se só existir loopback, usa ela mesmo para o programa continuar funcionando.
 int escolhe_interface_disponivel(char *destino, size_t tamanho) {
     if (destino == NULL || tamanho == 0) {
         fprintf(stderr, "Buffer de interface invalido\n");
         return -1;
     }
 
+    // Aqui ficam as interfaces no Linux (jeito simples de listar).
     DIR *diretorio = opendir("/sys/class/net");
     struct dirent *entrada;
 
@@ -23,6 +27,7 @@ int escolhe_interface_disponivel(char *destino, size_t tamanho) {
             continue;
         }
 
+        // Evita pegar "lo" quando tiver outra interface disponível.
         if (strcmp(entrada->d_name, "lo") != 0) {
             snprintf(destino, tamanho, "%s", entrada->d_name);
             closedir(diretorio);
@@ -30,6 +35,7 @@ int escolhe_interface_disponivel(char *destino, size_t tamanho) {
         }
     }
 
+    // Se não achou outra, usa a primeira que existir (normalmente a lo).
     rewinddir(diretorio);
     while ((entrada = readdir(diretorio)) != NULL) {
         if (strcmp(entrada->d_name, ".") == 0 || strcmp(entrada->d_name, "..") == 0) {
@@ -52,6 +58,7 @@ int obtem_ifindex_interface(const char *nome_interface_rede) {
         return -1;
     }
 
+    // O socket raw trabalha com número da interface (ifindex), não com nome.
     unsigned int ifindex = if_nametoindex(nome_interface_rede);
     if (ifindex == 0) {
         fprintf(stderr, "Interface de rede nao encontrada: %s\n", nome_interface_rede);
@@ -67,6 +74,7 @@ int obtem_mac_interface(const char *nome_interface_rede, unsigned char mac[ETH_A
         return -1;
     }
 
+    // Lê o MAC direto do sistema de arquivos do Linux.
     char caminho[256] = {0};
     snprintf(caminho, sizeof(caminho), "/sys/class/net/%s/address", nome_interface_rede);
 
@@ -90,6 +98,7 @@ int obtem_mac_interface(const char *nome_interface_rede, unsigned char mac[ETH_A
         return -1;
     }
 
+    // Converte o MAC de texto para bytes (formato usado na Ethernet).
     mac[0] = (unsigned char)b0;
     mac[1] = (unsigned char)b1;
     mac[2] = (unsigned char)b2;
@@ -100,7 +109,8 @@ int obtem_mac_interface(const char *nome_interface_rede, unsigned char mac[ETH_A
 }
 
 int cria_raw_socket(char *nome_interface_rede) {
-    // Cria arquivo para o socket sem qualquer protocolo
+    // Cria o socket raw para ler/enviar quadros Ethernet.
+    // ETH_P_ALL = aceita qualquer protocolo Ethernet.
     int soquete = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
     if (soquete == -1)
     {
@@ -117,7 +127,7 @@ int cria_raw_socket(char *nome_interface_rede) {
     endereco.sll_family = AF_PACKET;
     endereco.sll_protocol = htons(ETH_P_ALL);
     endereco.sll_ifindex = ifindex;
-    // Inicializa socket
+    // Prende o socket na interface escolhida.
     if (bind(soquete, (struct sockaddr *)&endereco, sizeof(endereco)) == -1)
     {
         fprintf(stderr, "Erro ao fazer bind no socket\n");
@@ -127,7 +137,7 @@ int cria_raw_socket(char *nome_interface_rede) {
     struct packet_mreq mr = {0};
     mr.mr_ifindex = ifindex;
     mr.mr_type = PACKET_MR_PROMISC;
-    // Não joga fora o que identifica como lixo: Modo promíscuo
+    // Modo promíscuo: captura também quadros que não são endereçados para esta máquina.
     if (setsockopt(soquete, SOL_PACKET, PACKET_ADD_MEMBERSHIP, &mr, sizeof(mr)) == -1)
     {
         fprintf(stderr, "Erro ao fazer setsockopt: "
@@ -138,8 +148,9 @@ int cria_raw_socket(char *nome_interface_rede) {
     return soquete;
 }
 
-// Evita que uma chamada de ao socket bloqueie o sistema por tempo indeterminado
+// Define um tempo máximo de espera no receive.
 int configura_timeout_socket(int soquete, int timeout_ms) {
+    // Evita ficar travado para sempre esperando pacote.
     struct timeval timeout = {
         .tv_sec = timeout_ms / 1000,
         .tv_usec = (timeout_ms % 1000) * 1000
@@ -155,7 +166,8 @@ int configura_timeout_socket(int soquete, int timeout_ms) {
 }
 
 int fecha_raw_socket(int soquete) {
-    if (close(soquete) == -1) { //timeout
+    // Fecha o socket e mantém o mesmo padrão de erro do resto do arquivo.
+    if (close(soquete) == -1) {
         fprintf(stderr, "Erro ao fechar socket\n");
         return -1;
     }
@@ -176,6 +188,7 @@ int configura_endereco_destino_raw(int ifindex, const unsigned char *mac_destino
     endereco_destino->sll_ifindex = ifindex;
     endereco_destino->sll_halen = ETH_ALEN;
 
+    // Só copia MAC se ele foi passado.
     if (mac_destino != NULL) {
         memcpy(endereco_destino->sll_addr, mac_destino, ETH_ALEN);
     }
@@ -190,6 +203,7 @@ ssize_t envia_bytes_raw(int soquete, const void *dados, size_t tamanho_dados,
         return -1;
     }
 
+    // Envia os bytes para o destino informado.
     ssize_t enviados = sendto(soquete,
                               dados,
                               tamanho_dados,
@@ -211,6 +225,7 @@ ssize_t recebe_bytes_raw(int soquete, void *buffer, size_t tamanho_buffer,
         return -1;
     }
 
+    // Se o chamador quiser saber quem enviou, usamos recvfrom.
     if (endereco_origem != NULL) {
         socklen_t tamanho_origem = sizeof(*endereco_origem);
         ssize_t recebidos = recvfrom(soquete,
@@ -220,6 +235,7 @@ ssize_t recebe_bytes_raw(int soquete, void *buffer, size_t tamanho_buffer,
                                      (struct sockaddr *)endereco_origem,
                                      &tamanho_origem);
         if (recebidos == -1) {
+            // Aqui isso normalmente significa timeout.
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 return -1;
             }
@@ -231,8 +247,10 @@ ssize_t recebe_bytes_raw(int soquete, void *buffer, size_t tamanho_buffer,
         return recebidos;
     }
 
+    // Caminho simples: recebe só os bytes.
     ssize_t recebidos = recv(soquete, buffer, tamanho_buffer, 0);
     if (recebidos == -1) {
+        // Timeout também retorna -1 aqui.
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
             return -1;
         }
