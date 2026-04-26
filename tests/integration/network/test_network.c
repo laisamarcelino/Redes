@@ -1,43 +1,7 @@
 #include "include/network.h"
 
-#include <dirent.h>
 #include <errno.h>
 #include <string.h>
-
-static int escolhe_interface(char *destino, size_t tamanho) {
-    DIR *diretorio = opendir("/sys/class/net");
-    struct dirent *entrada;
-
-    if (diretorio == NULL) {
-        return -1;
-    }
-
-    while ((entrada = readdir(diretorio)) != NULL) {
-        if (strcmp(entrada->d_name, ".") == 0 || strcmp(entrada->d_name, "..") == 0) {
-            continue;
-        }
-
-        if (strcmp(entrada->d_name, "lo") != 0) {
-            snprintf(destino, tamanho, "%s", entrada->d_name);
-            closedir(diretorio);
-            return 0;
-        }
-    }
-
-    rewinddir(diretorio);
-    while ((entrada = readdir(diretorio)) != NULL) {
-        if (strcmp(entrada->d_name, ".") == 0 || strcmp(entrada->d_name, "..") == 0) {
-            continue;
-        }
-
-        snprintf(destino, tamanho, "%s", entrada->d_name);
-        closedir(diretorio);
-        return 0;
-    }
-
-    closedir(diretorio);
-    return -1;
-}
 
 int main(void) {
     char interface[IF_NAMESIZE] = {0};
@@ -47,7 +11,7 @@ int main(void) {
         return 0;
     }
 
-    if (escolhe_interface(interface, sizeof(interface)) != 0) {
+    if (escolhe_interface_disponivel(interface, sizeof(interface)) != 0) {
         fprintf(stderr, "Falha ao localizar interface de rede para o teste\n");
         return 1;
     }

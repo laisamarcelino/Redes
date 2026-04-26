@@ -18,6 +18,7 @@ TEST_BINS := $(UNIT_TEST_BINS) $(INTEGRATION_TEST_BINS)
 # Formato da chave:
 #   EXTRA_SRCS_integration_<caminho_relativo_com_barras_trocadas_por_underscore>
 EXTRA_SRCS_integration_network_test_network := src/network.c
+EXTRA_SRCS_integration_network_test_file_transfer := src/network.c
 
 .PHONY: all build-tests test test-unit test-integration list-tests clean
 

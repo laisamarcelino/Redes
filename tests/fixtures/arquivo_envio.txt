@@ -1,0 +1,5 @@
+--------------------------------------------------
+Teste de transferencia via raw socket com arquivo pre-existente.
+Este arquivo fica versionado no repositório para validar envio real.
+Linha final para conferência visual.
+-----------------------------------------------
