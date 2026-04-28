@@ -116,3 +116,15 @@ Para remover os binarios gerados:
 ```bash
 make clean
 ```
+
+## Comunicação Direta no Cabo (Layer-2 / Ethernet Raw)
+
+A comunicação ocorre diretamente no cabo utilizando sockets raw (AF_PACKET) para enviar quadros Ethernet. 
+
+### Vantagens:
+- Não utiliza IP, funcionando apenas em conexões diretas.
+
+### Desvantagens:
+- Requer permissões de root ou capacidades (CAP_NET_RAW).
+- Necessidade de implementar um protocolo próprio, incluindo fragmentação, confirmação e reenvio, uma vez que não há suporte a TCP.
+- Atenção ao MTU, que é de aproximadamente 1500 bytes por quadro.

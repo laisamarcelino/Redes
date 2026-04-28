@@ -7,6 +7,8 @@ BUILD_DIR := $(TESTS_DIR)/build
 UNIT_SRC_DIR := $(TESTS_DIR)/unit
 INTEGRATION_SRC_DIR := $(TESTS_DIR)/integration
 
+APP_BINS := cliente servidor
+
 UNIT_TEST_SRCS := $(shell find $(UNIT_SRC_DIR) -type f -name '*.c' 2>/dev/null | sort)
 INTEGRATION_TEST_SRCS := $(shell find $(INTEGRATION_SRC_DIR) -type f -name '*.c' 2>/dev/null | sort)
 
@@ -20,9 +22,17 @@ TEST_BINS := $(UNIT_TEST_BINS) $(INTEGRATION_TEST_BINS)
 EXTRA_SRCS_integration_network_test_network := src/network.c
 EXTRA_SRCS_integration_network_test_file_transfer := src/network.c
 
-.PHONY: all build-tests test test-unit test-integration list-tests clean
+.PHONY: all tests build-tests test test-unit test-integration list-tests clean
 
-all: build-tests
+all: $(APP_BINS)
+
+cliente: src/cliente.c src/network.c include/network.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) src/cliente.c src/network.c -o $@
+
+servidor: src/servidor.c src/network.c include/network.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) src/servidor.c src/network.c -o $@
+
+tests: test
 
 build-tests: $(TEST_BINS)
 
@@ -60,4 +70,4 @@ $(foreach src,$(INTEGRATION_TEST_SRCS),\
     $(EXTRA_SRCS_integration_$(subst /,_,$(basename $(patsubst $(INTEGRATION_SRC_DIR)/%,%,$(src))))))))
 
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD_DIR) $(APP_BINS)

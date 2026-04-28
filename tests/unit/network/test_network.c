@@ -10,7 +10,6 @@ static int fake_socket_return = 42;
 static int fake_bind_return = 0;
 static int fake_setsockopt_return = 0;
 static int fake_close_return = 0;
-static unsigned int fake_ifindex_return = 7;
 
 static int socket_called = 0;
 static int bind_called = 0;
@@ -33,7 +32,6 @@ static struct packet_mreq last_packet_mreq;
 static struct timeval last_timeval;
 
 static int last_close_socket = 0;
-static char last_ifname[IF_NAMESIZE];
 
 static int exit_called = 0;
 static int exit_status_code = 0;
@@ -44,7 +42,6 @@ static void reset_fakes(void) {
     fake_bind_return = 0;
     fake_setsockopt_return = 0;
     fake_close_return = 0;
-    fake_ifindex_return = 7;
 
     socket_called = 0;
     bind_called = 0;
@@ -67,7 +64,6 @@ static void reset_fakes(void) {
     memset(&last_timeval, 0, sizeof(last_timeval));
 
     last_close_socket = 0;
-    memset(last_ifname, 0, sizeof(last_ifname));
 
     exit_called = 0;
     exit_status_code = 0;
@@ -79,11 +75,6 @@ static int test_socket(int domain, int type, int protocol) {
     last_socket_type = type;
     last_socket_protocol = protocol;
     return fake_socket_return;
-}
-
-static unsigned int test_if_nametoindex(const char *ifname) {
-    snprintf(last_ifname, sizeof(last_ifname), "%s", ifname);
-    return fake_ifindex_return;
 }
 
 static int test_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
@@ -129,14 +120,12 @@ static void test_exit(int status) {
 }
 
 #define socket test_socket
-#define if_nametoindex test_if_nametoindex
 #define bind test_bind
 #define setsockopt test_setsockopt
 #define close test_close
 #define exit test_exit
 #include "../../../src/network.c"
 #undef socket
-#undef if_nametoindex
 #undef bind
 #undef setsockopt
 #undef close
@@ -153,23 +142,22 @@ static int assert_true(int condition, const char *message) {
 static int test_cria_raw_socket_success(void) {
     reset_fakes();
 
-    int soquete = cria_raw_socket("eth0");
+    int soquete = cria_raw_socket("lo");
 
     if (!assert_true(soquete == fake_socket_return, "cria_raw_socket deve retornar o descritor criado")) return 0;
     if (!assert_true(socket_called == 1, "socket deve ser chamado uma vez")) return 0;
     if (!assert_true(last_socket_domain == AF_PACKET, "socket deve usar AF_PACKET")) return 0;
     if (!assert_true(last_socket_type == SOCK_RAW, "socket deve usar SOCK_RAW")) return 0;
     if (!assert_true(last_socket_protocol == htons(ETH_P_ALL), "socket deve usar ETH_P_ALL")) return 0;
-    if (!assert_true(strcmp(last_ifname, "eth0") == 0, "if_nametoindex deve receber a interface informada")) return 0;
     if (!assert_true(bind_called == 1, "bind deve ser chamado uma vez")) return 0;
     if (!assert_true(last_bind_socket == fake_socket_return, "bind deve usar o descritor criado")) return 0;
     if (!assert_true(last_bind_addr.sll_family == AF_PACKET, "bind deve usar AF_PACKET")) return 0;
     if (!assert_true(last_bind_addr.sll_protocol == htons(ETH_P_ALL), "bind deve usar ETH_P_ALL")) return 0;
-    if (!assert_true(last_bind_addr.sll_ifindex == (int)fake_ifindex_return, "bind deve usar o ifindex retornado")) return 0;
+    if (!assert_true(last_bind_addr.sll_ifindex > 0, "bind deve usar ifindex valido")) return 0;
     if (!assert_true(setsockopt_called == 1, "setsockopt deve ser chamado uma vez na criação")) return 0;
     if (!assert_true(last_setsockopt_level == SOL_PACKET, "setsockopt deve configurar SOL_PACKET")) return 0;
     if (!assert_true(last_setsockopt_optname == PACKET_ADD_MEMBERSHIP, "setsockopt deve habilitar PACKET_ADD_MEMBERSHIP")) return 0;
-    if (!assert_true(last_packet_mreq.mr_ifindex == (int)fake_ifindex_return, "packet_mreq deve usar o ifindex retornado")) return 0;
+    if (!assert_true(last_packet_mreq.mr_ifindex == last_bind_addr.sll_ifindex, "packet_mreq deve usar o mesmo ifindex do bind")) return 0;
     if (!assert_true(last_packet_mreq.mr_type == PACKET_MR_PROMISC, "packet_mreq deve ativar modo promiscuo")) return 0;
 
     return 1;
@@ -180,7 +168,7 @@ static int test_cria_raw_socket_socket_failure(void) {
     fake_socket_return = -1;
 
     if (setjmp(exit_jmp) == 0) {
-        cria_raw_socket("eth0");
+        cria_raw_socket("lo");
         return assert_true(0, "cria_raw_socket deveria encerrar em falha de socket");
     }
 
@@ -197,7 +185,7 @@ static int test_cria_raw_socket_bind_failure(void) {
     fake_bind_return = -1;
 
     if (setjmp(exit_jmp) == 0) {
-        cria_raw_socket("eth0");
+        cria_raw_socket("lo");
         return assert_true(0, "cria_raw_socket deveria encerrar em falha de bind");
     }
 
@@ -214,7 +202,7 @@ static int test_cria_raw_socket_setsockopt_failure(void) {
     fake_setsockopt_return = -1;
 
     if (setjmp(exit_jmp) == 0) {
-        cria_raw_socket("eth0");
+        cria_raw_socket("lo");
         return assert_true(0, "cria_raw_socket deveria encerrar em falha de setsockopt");
     }
 

@@ -4,16 +4,37 @@
 #include <errno.h>
 #include <string.h>
 
-// Escolhe uma interface de rede para usar.
-// Primeiro tenta uma interface "normal" (não loopback).
-// Se só existir loopback, usa ela mesmo para o programa continuar funcionando.
+/* Obtém índice da interface (alternativa a if_nametoindex). */
+static unsigned int obtem_indice_interface_raw(const char *nome) {
+    DIR *dir = opendir("/sys/class/net");
+    if (dir == NULL) {
+        return 0;
+    }
+
+    struct dirent *entrada;
+    unsigned int indice = 1;
+
+    while ((entrada = readdir(dir)) != NULL) {
+        if (strcmp(entrada->d_name, nome) == 0) {
+            closedir(dir);
+            return indice;
+        }
+        if (strcmp(entrada->d_name, ".") != 0 && strcmp(entrada->d_name, "..") != 0) {
+            indice++;
+        }
+    }
+
+    closedir(dir);
+    return 0;
+}
+
+/* Escolhe uma interface de rede disponível. */
 int escolhe_interface_disponivel(char *destino, size_t tamanho) {
     if (destino == NULL || tamanho == 0) {
         fprintf(stderr, "Buffer de interface invalido\n");
         return -1;
     }
 
-    // Aqui ficam as interfaces no Linux (jeito simples de listar).
     DIR *diretorio = opendir("/sys/class/net");
     struct dirent *entrada;
 
@@ -27,7 +48,7 @@ int escolhe_interface_disponivel(char *destino, size_t tamanho) {
             continue;
         }
 
-        // Evita pegar "lo" quando tiver outra interface disponível.
+        /* Prioriza interfaces não loopback. */
         if (strcmp(entrada->d_name, "lo") != 0) {
             snprintf(destino, tamanho, "%s", entrada->d_name);
             closedir(diretorio);
@@ -35,7 +56,7 @@ int escolhe_interface_disponivel(char *destino, size_t tamanho) {
         }
     }
 
-    // Se não achou outra, usa a primeira que existir (normalmente a lo).
+    /* Se só houver loopback, usa ela. */
     rewinddir(diretorio);
     while ((entrada = readdir(diretorio)) != NULL) {
         if (strcmp(entrada->d_name, ".") == 0 || strcmp(entrada->d_name, "..") == 0) {
@@ -58,8 +79,7 @@ int obtem_ifindex_interface(const char *nome_interface_rede) {
         return -1;
     }
 
-    // O socket raw trabalha com número da interface (ifindex), não com nome.
-    unsigned int ifindex = if_nametoindex(nome_interface_rede);
+    unsigned int ifindex = obtem_indice_interface_raw(nome_interface_rede);
     if (ifindex == 0) {
         fprintf(stderr, "Interface de rede nao encontrada: %s\n", nome_interface_rede);
         return -1;
@@ -98,7 +118,7 @@ int obtem_mac_interface(const char *nome_interface_rede, unsigned char mac[ETH_A
         return -1;
     }
 
-    // Converte o MAC de texto para bytes (formato usado na Ethernet).
+    /* Converte MAC de texto para bytes. */
     mac[0] = (unsigned char)b0;
     mac[1] = (unsigned char)b1;
     mac[2] = (unsigned char)b2;
@@ -109,11 +129,9 @@ int obtem_mac_interface(const char *nome_interface_rede, unsigned char mac[ETH_A
 }
 
 int cria_raw_socket(char *nome_interface_rede) {
-    // Cria o socket raw para ler/enviar quadros Ethernet.
-    // ETH_P_ALL = aceita qualquer protocolo Ethernet.
+    /* Cria socket raw para ler/enviar quadros Ethernet. */
     int soquete = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
-    if (soquete == -1)
-    {
+    if (soquete == -1) {
         fprintf(stderr, "Erro ao criar socket: Verifique se você é root!\n");
         exit(-1);
     }
@@ -127,9 +145,9 @@ int cria_raw_socket(char *nome_interface_rede) {
     endereco.sll_family = AF_PACKET;
     endereco.sll_protocol = htons(ETH_P_ALL);
     endereco.sll_ifindex = ifindex;
-    // Prende o socket na interface escolhida.
-    if (bind(soquete, (struct sockaddr *)&endereco, sizeof(endereco)) == -1)
-    {
+
+    /* Prende o socket na interface escolhida. */
+    if (bind(soquete, (struct sockaddr *)&endereco, sizeof(endereco)) == -1) {
         fprintf(stderr, "Erro ao fazer bind no socket\n");
         exit(-1);
     }
@@ -137,27 +155,25 @@ int cria_raw_socket(char *nome_interface_rede) {
     struct packet_mreq mr = {0};
     mr.mr_ifindex = ifindex;
     mr.mr_type = PACKET_MR_PROMISC;
-    // Modo promíscuo: captura também quadros que não são endereçados para esta máquina.
-    if (setsockopt(soquete, SOL_PACKET, PACKET_ADD_MEMBERSHIP, &mr, sizeof(mr)) == -1)
-    {
-        fprintf(stderr, "Erro ao fazer setsockopt: "
-                        "Verifique se a interface de rede foi especificada corretamente.\n");
+
+    /* Modo promíscuo: captura quadros não endereçados para esta máquina. */
+    if (setsockopt(soquete, SOL_PACKET, PACKET_ADD_MEMBERSHIP, &mr, sizeof(mr)) == -1) {
+        fprintf(stderr, "Erro ao fazer setsockopt: Verifique se a interface está correta.\n");
         exit(-1);
     }
 
     return soquete;
 }
 
-// Define um tempo máximo de espera no receive.
+/* Define um tempo máximo de espera no receive. */
 int configura_timeout_socket(int soquete, int timeout_ms) {
-    // Evita ficar travado para sempre esperando pacote.
     struct timeval timeout = {
         .tv_sec = timeout_ms / 1000,
         .tv_usec = (timeout_ms % 1000) * 1000
     };
 
     if (setsockopt(soquete, SOL_SOCKET, SO_RCVTIMEO,
-                   (char*) &timeout, sizeof(timeout)) == -1) {
+                   (char *)&timeout, sizeof(timeout)) == -1) {
         fprintf(stderr, "Erro ao configurar timeout no socket\n");
         return -1;
     }
@@ -166,7 +182,6 @@ int configura_timeout_socket(int soquete, int timeout_ms) {
 }
 
 int fecha_raw_socket(int soquete) {
-    // Fecha o socket e mantém o mesmo padrão de erro do resto do arquivo.
     if (close(soquete) == -1) {
         fprintf(stderr, "Erro ao fechar socket\n");
         return -1;
@@ -188,7 +203,7 @@ int configura_endereco_destino_raw(int ifindex, const unsigned char *mac_destino
     endereco_destino->sll_ifindex = ifindex;
     endereco_destino->sll_halen = ETH_ALEN;
 
-    // Só copia MAC se ele foi passado.
+    /* Só copia MAC se ele foi passado. */
     if (mac_destino != NULL) {
         memcpy(endereco_destino->sll_addr, mac_destino, ETH_ALEN);
     }
@@ -203,13 +218,9 @@ ssize_t envia_bytes_raw(int soquete, const void *dados, size_t tamanho_dados,
         return -1;
     }
 
-    // Envia os bytes para o destino informado.
-    ssize_t enviados = sendto(soquete,
-                              dados,
-                              tamanho_dados,
-                              0,
-                              (const struct sockaddr *)endereco_destino,
-                              sizeof(*endereco_destino));
+    ssize_t enviados = sendto(soquete, dados, tamanho_dados, 0,
+                             (const struct sockaddr *)endereco_destino,
+                             sizeof(*endereco_destino));
     if (enviados == -1) {
         fprintf(stderr, "Erro ao enviar bytes no raw socket\n");
         return -1;
@@ -225,17 +236,13 @@ ssize_t recebe_bytes_raw(int soquete, void *buffer, size_t tamanho_buffer,
         return -1;
     }
 
-    // Se o chamador quiser saber quem enviou, usamos recvfrom.
+    /* Se o chamador quiser saber quem enviou, usamos recvfrom. */
     if (endereco_origem != NULL) {
         socklen_t tamanho_origem = sizeof(*endereco_origem);
-        ssize_t recebidos = recvfrom(soquete,
-                                     buffer,
-                                     tamanho_buffer,
-                                     0,
-                                     (struct sockaddr *)endereco_origem,
-                                     &tamanho_origem);
+        ssize_t recebidos = recvfrom(soquete, buffer, tamanho_buffer, 0,
+                                    (struct sockaddr *)endereco_origem,
+                                    &tamanho_origem);
         if (recebidos == -1) {
-            // Aqui isso normalmente significa timeout.
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 return -1;
             }
@@ -247,10 +254,9 @@ ssize_t recebe_bytes_raw(int soquete, void *buffer, size_t tamanho_buffer,
         return recebidos;
     }
 
-    // Caminho simples: recebe só os bytes.
+    /* Recebe apenas os bytes sem informação de origem. */
     ssize_t recebidos = recv(soquete, buffer, tamanho_buffer, 0);
     if (recebidos == -1) {
-        // Timeout também retorna -1 aqui.
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
             return -1;
         }
@@ -260,4 +266,115 @@ ssize_t recebe_bytes_raw(int soquete, void *buffer, size_t tamanho_buffer,
     }
 
     return recebidos;
+}
+
+/* Envia mensagem com cabeçalho de tamanho.
+ *
+ * Formato: [cabeçalho(4 bytes) | payload(tamanho variável)]
+ * O cabeçalho contém o tamanho do payload em network byte order.
+ */
+ssize_t envia_mensagem(int soquete, const void *dados, size_t tamanho,
+                      const struct sockaddr_ll *endereco_destino) {
+    if (dados == NULL || tamanho == 0 || endereco_destino == NULL) {
+        fprintf(stderr, "Parametros invalidos para envio de mensagem\n");
+        return -1;
+    }
+
+    /* Aloca buffer para cabeçalho + dados. */
+    size_t tamanho_total = sizeof(msg_cabecalho_t) + tamanho;
+    unsigned char *buffer = malloc(tamanho_total);
+    if (buffer == NULL) {
+        fprintf(stderr, "Erro ao alocar memoria para mensagem\n");
+        return -1;
+    }
+
+    /* Preenche cabeçalho com tamanho em network byte order (big-endian). */
+    msg_cabecalho_t *cabecalho = (msg_cabecalho_t *)buffer;
+    cabecalho->tamanho_payload = htonl((unsigned int)tamanho);
+
+    /* Copia dados imediatamente após o cabeçalho. */
+    memcpy(buffer + sizeof(msg_cabecalho_t), dados, tamanho);
+
+    /* Envia buffer completo para o destino. */
+    ssize_t enviados = sendto(soquete, buffer, tamanho_total, 0,
+                             (const struct sockaddr *)endereco_destino,
+                             sizeof(*endereco_destino));
+    free(buffer);
+
+    if (enviados == -1) {
+        fprintf(stderr, "Erro ao enviar mensagem no raw socket\n");
+        return -1;
+    }
+
+    return enviados;
+}
+
+/* Recebe mensagem com cabeçalho de tamanho.
+ *
+ * Formato: [cabeçalho(4 bytes) | payload(tamanho variável)]
+ * Extrai e valida o cabeçalho, depois copia apenas o payload para o buffer.
+ */
+ssize_t recebe_mensagem(int soquete, void *buffer, size_t tamanho_max,
+                       struct sockaddr_ll *endereco_origem) {
+    if (buffer == NULL || tamanho_max == 0) {
+        fprintf(stderr, "Parametros invalidos para recebimento de mensagem\n");
+        return -1;
+    }
+
+    /* Aloca buffer temporário para receber cabeçalho + dados. */
+    size_t tamanho_temp = sizeof(msg_cabecalho_t) + tamanho_max;
+    unsigned char *buffer_temp = malloc(tamanho_temp);
+    if (buffer_temp == NULL) {
+        fprintf(stderr, "Erro ao alocar memoria para recebimento\n");
+        return -1;
+    }
+
+    /* Recebe dados brutos do socket com informações de origem. */
+    socklen_t tamanho_origem = sizeof(*endereco_origem);
+    ssize_t recebidos = recvfrom(soquete, buffer_temp, tamanho_temp, 0,
+                                (struct sockaddr *)endereco_origem,
+                                &tamanho_origem);
+
+    if (recebidos == -1) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            free(buffer_temp);
+            return -1;
+        }
+        fprintf(stderr, "Erro ao receber mensagem no raw socket\n");
+        free(buffer_temp);
+        return -1;
+    }
+
+    /* Valida se recebeu pelo menos o cabeçalho. */
+    if (recebidos < (ssize_t)sizeof(msg_cabecalho_t)) {
+        fprintf(stderr, "Mensagem incompleta: tamanho %ld menor que cabecalho\n", recebidos);
+        free(buffer_temp);
+        return -1;
+    }
+
+    /* Extrai tamanho do payload do cabeçalho (converte de network byte order). */
+    msg_cabecalho_t *cabecalho = (msg_cabecalho_t *)buffer_temp;
+    unsigned int tamanho_payload = ntohl(cabecalho->tamanho_payload);
+
+    /* Valida consistência entre tamanho declarado e tamanho recebido. */
+    if ((size_t)(recebidos - sizeof(msg_cabecalho_t)) != tamanho_payload) {
+        fprintf(stderr, "Tamanho de payload inconsistente: esperado %u, recebido %ld\n",
+                tamanho_payload, recebidos - (ssize_t)sizeof(msg_cabecalho_t));
+        free(buffer_temp);
+        return -1;
+    }
+
+    /* Valida se o payload cabe no buffer do usuário. */
+    if (tamanho_payload > tamanho_max) {
+        fprintf(stderr, "Payload muito grande: %u > %zu\n", tamanho_payload, tamanho_max);
+        free(buffer_temp);
+        return -1;
+    }
+
+    /* Copia apenas o payload (sem cabeçalho) para o buffer do usuário. */
+    memcpy(buffer, buffer_temp + sizeof(msg_cabecalho_t), tamanho_payload);
+    free(buffer_temp);
+
+    /* Retorna tamanho real do payload recebido. */
+    return (ssize_t)tamanho_payload;
 }
