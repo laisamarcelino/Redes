@@ -2,6 +2,7 @@
 #define NETWORK_H
 
 #include <arpa/inet.h>
+#include <linux/if_ether.h>
 #include <net/ethernet.h>
 #include <linux/if_packet.h>
 #include <net/if.h>
@@ -21,6 +22,8 @@
 typedef struct {
     uint32_t tamanho_payload;
 } msg_cabecalho_t;
+
+#define MENSAGEM_PAYLOAD_MAX (ETH_DATA_LEN - sizeof(msg_cabecalho_t))
 
 /* ===== Declarações de Funções ===== */
 

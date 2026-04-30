@@ -4,30 +4,6 @@
 #include <errno.h>
 #include <string.h>
 
-/* Obtém índice da interface (alternativa a if_nametoindex). */
-static unsigned int obtem_indice_interface_raw(const char *nome) {
-    DIR *dir = opendir("/sys/class/net");
-    if (dir == NULL) {
-        return 0;
-    }
-
-    struct dirent *entrada;
-    unsigned int indice = 1;
-
-    while ((entrada = readdir(dir)) != NULL) {
-        if (strcmp(entrada->d_name, nome) == 0) {
-            closedir(dir);
-            return indice;
-        }
-        if (strcmp(entrada->d_name, ".") != 0 && strcmp(entrada->d_name, "..") != 0) {
-            indice++;
-        }
-    }
-
-    closedir(dir);
-    return 0;
-}
-
 /* Escolhe uma interface de rede disponível. */
 int escolhe_interface_disponivel(char *destino, size_t tamanho) {
     if (destino == NULL || tamanho == 0) {
@@ -79,7 +55,7 @@ int obtem_ifindex_interface(const char *nome_interface_rede) {
         return -1;
     }
 
-    unsigned int ifindex = obtem_indice_interface_raw(nome_interface_rede);
+    unsigned int ifindex = if_nametoindex(nome_interface_rede);
     if (ifindex == 0) {
         fprintf(stderr, "Interface de rede nao encontrada: %s\n", nome_interface_rede);
         return -1;
@@ -133,12 +109,13 @@ int cria_raw_socket(char *nome_interface_rede) {
     int soquete = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
     if (soquete == -1) {
         fprintf(stderr, "Erro ao criar socket: Verifique se você é root!\n");
-        exit(-1);
+        return -1;
     }
 
     int ifindex = obtem_ifindex_interface(nome_interface_rede);
     if (ifindex < 0) {
-        exit(-1);
+        close(soquete);
+        return -1;
     }
 
     struct sockaddr_ll endereco = {0};
@@ -149,7 +126,8 @@ int cria_raw_socket(char *nome_interface_rede) {
     /* Prende o socket na interface escolhida. */
     if (bind(soquete, (struct sockaddr *)&endereco, sizeof(endereco)) == -1) {
         fprintf(stderr, "Erro ao fazer bind no socket\n");
-        exit(-1);
+        close(soquete);
+        return -1;
     }
 
     struct packet_mreq mr = {0};
@@ -159,7 +137,8 @@ int cria_raw_socket(char *nome_interface_rede) {
     /* Modo promíscuo: captura quadros não endereçados para esta máquina. */
     if (setsockopt(soquete, SOL_PACKET, PACKET_ADD_MEMBERSHIP, &mr, sizeof(mr)) == -1) {
         fprintf(stderr, "Erro ao fazer setsockopt: Verifique se a interface está correta.\n");
-        exit(-1);
+        close(soquete);
+        return -1;
     }
 
     return soquete;
@@ -268,9 +247,31 @@ ssize_t recebe_bytes_raw(int soquete, void *buffer, size_t tamanho_buffer,
     return recebidos;
 }
 
+static int obtem_mac_socket(int soquete, unsigned char mac[ETH_ALEN]) {
+    struct sockaddr_ll endereco = {0};
+    socklen_t tamanho_endereco = sizeof(endereco);
+    char nome_interface[IF_NAMESIZE] = {0};
+
+    if (mac == NULL) {
+        return -1;
+    }
+
+    if (getsockname(soquete, (struct sockaddr *)&endereco, &tamanho_endereco) == -1) {
+        fprintf(stderr, "Erro ao obter interface do socket\n");
+        return -1;
+    }
+
+    if (if_indextoname(endereco.sll_ifindex, nome_interface) == NULL) {
+        fprintf(stderr, "Erro ao converter ifindex para nome de interface\n");
+        return -1;
+    }
+
+    return obtem_mac_interface(nome_interface, mac);
+}
+
 /* Envia mensagem com cabeçalho de tamanho.
  *
- * Formato: [cabeçalho(4 bytes) | payload(tamanho variável)]
+ * Formato: [Ethernet | cabeçalho(4 bytes) | payload(tamanho variável)]
  * O cabeçalho contém o tamanho do payload em network byte order.
  */
 ssize_t envia_mensagem(int soquete, const void *dados, size_t tamanho,
@@ -280,22 +281,34 @@ ssize_t envia_mensagem(int soquete, const void *dados, size_t tamanho,
         return -1;
     }
 
-    /* Aloca buffer para cabeçalho + dados. */
-    size_t tamanho_total = sizeof(msg_cabecalho_t) + tamanho;
+    if (tamanho > MENSAGEM_PAYLOAD_MAX) {
+        fprintf(stderr, "Mensagem muito grande para um frame Ethernet: %zu > %zu\n",
+                tamanho, (size_t)MENSAGEM_PAYLOAD_MAX);
+        return -1;
+    }
+
+    unsigned char mac_origem[ETH_ALEN] = {0};
+    if (obtem_mac_socket(soquete, mac_origem) == -1) {
+        return -1;
+    }
+
+    size_t tamanho_total = sizeof(struct ethhdr) + sizeof(msg_cabecalho_t) + tamanho;
     unsigned char *buffer = malloc(tamanho_total);
     if (buffer == NULL) {
         fprintf(stderr, "Erro ao alocar memoria para mensagem\n");
         return -1;
     }
 
-    /* Preenche cabeçalho com tamanho em network byte order (big-endian). */
-    msg_cabecalho_t *cabecalho = (msg_cabecalho_t *)buffer;
+    struct ethhdr *eth = (struct ethhdr *)buffer;
+    memcpy(eth->h_dest, endereco_destino->sll_addr, ETH_ALEN);
+    memcpy(eth->h_source, mac_origem, ETH_ALEN);
+    eth->h_proto = htons(ETHER_TYPE_PROTOCOLO_PROPRIO);
+
+    msg_cabecalho_t *cabecalho = (msg_cabecalho_t *)(buffer + sizeof(struct ethhdr));
     cabecalho->tamanho_payload = htonl((unsigned int)tamanho);
 
-    /* Copia dados imediatamente após o cabeçalho. */
-    memcpy(buffer + sizeof(msg_cabecalho_t), dados, tamanho);
+    memcpy(buffer + sizeof(struct ethhdr) + sizeof(msg_cabecalho_t), dados, tamanho);
 
-    /* Envia buffer completo para o destino. */
     ssize_t enviados = sendto(soquete, buffer, tamanho_total, 0,
                              (const struct sockaddr *)endereco_destino,
                              sizeof(*endereco_destino));
@@ -311,7 +324,7 @@ ssize_t envia_mensagem(int soquete, const void *dados, size_t tamanho,
 
 /* Recebe mensagem com cabeçalho de tamanho.
  *
- * Formato: [cabeçalho(4 bytes) | payload(tamanho variável)]
+ * Formato: [Ethernet | cabeçalho(4 bytes) | payload(tamanho variável)]
  * Extrai e valida o cabeçalho, depois copia apenas o payload para o buffer.
  */
 ssize_t recebe_mensagem(int soquete, void *buffer, size_t tamanho_max,
@@ -321,60 +334,69 @@ ssize_t recebe_mensagem(int soquete, void *buffer, size_t tamanho_max,
         return -1;
     }
 
-    /* Aloca buffer temporário para receber cabeçalho + dados. */
-    size_t tamanho_temp = sizeof(msg_cabecalho_t) + tamanho_max;
+    if (tamanho_max > MENSAGEM_PAYLOAD_MAX) {
+        tamanho_max = MENSAGEM_PAYLOAD_MAX;
+    }
+
+    size_t tamanho_temp = sizeof(struct ethhdr) + sizeof(msg_cabecalho_t) + tamanho_max;
     unsigned char *buffer_temp = malloc(tamanho_temp);
     if (buffer_temp == NULL) {
         fprintf(stderr, "Erro ao alocar memoria para recebimento\n");
         return -1;
     }
 
-    /* Recebe dados brutos do socket com informações de origem. */
-    socklen_t tamanho_origem = sizeof(*endereco_origem);
-    ssize_t recebidos = recvfrom(soquete, buffer_temp, tamanho_temp, 0,
-                                (struct sockaddr *)endereco_origem,
-                                &tamanho_origem);
+    while (1) {
+        struct sockaddr_ll origem_temp = {0};
+        struct sockaddr_ll *origem_ptr = endereco_origem != NULL ? endereco_origem : &origem_temp;
+        socklen_t tamanho_origem = sizeof(*origem_ptr);
+        ssize_t recebidos = recvfrom(soquete, buffer_temp, tamanho_temp, 0,
+                                    (struct sockaddr *)origem_ptr,
+                                    &tamanho_origem);
 
-    if (recebidos == -1) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        if (recebidos == -1) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                free(buffer_temp);
+                return -1;
+            }
+            fprintf(stderr, "Erro ao receber mensagem no raw socket\n");
             free(buffer_temp);
             return -1;
         }
-        fprintf(stderr, "Erro ao receber mensagem no raw socket\n");
+
+        if (origem_ptr->sll_pkttype == PACKET_OUTGOING) {
+            continue;
+        }
+
+        if (recebidos < (ssize_t)(sizeof(struct ethhdr) + sizeof(msg_cabecalho_t))) {
+            continue;
+        }
+
+        struct ethhdr *eth = (struct ethhdr *)buffer_temp;
+        if (ntohs(eth->h_proto) != ETHER_TYPE_PROTOCOLO_PROPRIO) {
+            continue;
+        }
+
+        msg_cabecalho_t *cabecalho =
+            (msg_cabecalho_t *)(buffer_temp + sizeof(struct ethhdr));
+        unsigned int tamanho_payload = ntohl(cabecalho->tamanho_payload);
+        size_t tamanho_dados_recebidos =
+            (size_t)recebidos - sizeof(struct ethhdr) - sizeof(msg_cabecalho_t);
+
+        if (tamanho_dados_recebidos < tamanho_payload) {
+            fprintf(stderr, "Tamanho de payload inconsistente: esperado %u, recebido %zu\n",
+                    tamanho_payload, tamanho_dados_recebidos);
+            continue;
+        }
+
+        if (tamanho_payload > tamanho_max) {
+            fprintf(stderr, "Payload muito grande: %u > %zu\n", tamanho_payload, tamanho_max);
+            continue;
+        }
+
+        memcpy(buffer,
+               buffer_temp + sizeof(struct ethhdr) + sizeof(msg_cabecalho_t),
+               tamanho_payload);
         free(buffer_temp);
-        return -1;
+        return (ssize_t)tamanho_payload;
     }
-
-    /* Valida se recebeu pelo menos o cabeçalho. */
-    if (recebidos < (ssize_t)sizeof(msg_cabecalho_t)) {
-        fprintf(stderr, "Mensagem incompleta: tamanho %ld menor que cabecalho\n", recebidos);
-        free(buffer_temp);
-        return -1;
-    }
-
-    /* Extrai tamanho do payload do cabeçalho (converte de network byte order). */
-    msg_cabecalho_t *cabecalho = (msg_cabecalho_t *)buffer_temp;
-    unsigned int tamanho_payload = ntohl(cabecalho->tamanho_payload);
-
-    /* Valida consistência entre tamanho declarado e tamanho recebido. */
-    if ((size_t)(recebidos - sizeof(msg_cabecalho_t)) != tamanho_payload) {
-        fprintf(stderr, "Tamanho de payload inconsistente: esperado %u, recebido %ld\n",
-                tamanho_payload, recebidos - (ssize_t)sizeof(msg_cabecalho_t));
-        free(buffer_temp);
-        return -1;
-    }
-
-    /* Valida se o payload cabe no buffer do usuário. */
-    if (tamanho_payload > tamanho_max) {
-        fprintf(stderr, "Payload muito grande: %u > %zu\n", tamanho_payload, tamanho_max);
-        free(buffer_temp);
-        return -1;
-    }
-
-    /* Copia apenas o payload (sem cabeçalho) para o buffer do usuário. */
-    memcpy(buffer, buffer_temp + sizeof(msg_cabecalho_t), tamanho_payload);
-    free(buffer_temp);
-
-    /* Retorna tamanho real do payload recebido. */
-    return (ssize_t)tamanho_payload;
 }

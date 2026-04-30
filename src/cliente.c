@@ -50,6 +50,12 @@ int main(int argc, char *argv[]) {
     if (modo_forcado == 1) {
         printf("Modo: Texto\n");
         size_t tamanho_texto = strlen(argumento);
+        if (tamanho_texto + 1 > MENSAGEM_PAYLOAD_MAX) {
+            fprintf(stderr, "Erro: Mensagem muito grande. Limite: %zu bytes\n",
+                    (size_t)MENSAGEM_PAYLOAD_MAX - 1);
+            return -1;
+        }
+
         buffer_envio = malloc(tamanho_texto + 1);
         if (buffer_envio == NULL) {
             fprintf(stderr, "Erro: Falha ao alocar memoria\n");
@@ -72,8 +78,7 @@ int main(int argc, char *argv[]) {
             return -1;
         }
 
-        /* Aloca buffer para arquivo. */
-        buffer_envio = malloc(BUFFER_TAMANHO);
+        buffer_envio = malloc(MENSAGEM_PAYLOAD_MAX);
         if (buffer_envio == NULL) {
             fprintf(stderr, "Erro: Falha ao alocar memoria\n");
             fclose(arquivo);
@@ -82,9 +87,24 @@ int main(int argc, char *argv[]) {
 
         /* Lê arquivo. */
         buffer_envio[0] = 'A';
-        size_t lidos = fread(buffer_envio + 1, 1, BUFFER_TAMANHO - 1, arquivo);
+        size_t lidos = fread(buffer_envio + 1, 1, MENSAGEM_PAYLOAD_MAX - 1, arquivo);
+        if (ferror(arquivo) != 0) {
+            fprintf(stderr, "Erro: Falha na leitura do arquivo\n");
+            free(buffer_envio);
+            fclose(arquivo);
+            return -1;
+        }
+
         if (lidos == 0) {
-            fprintf(stderr, "Erro: Arquivo vazio ou falha na leitura\n");
+            fprintf(stderr, "Erro: Arquivo vazio\n");
+            free(buffer_envio);
+            fclose(arquivo);
+            return -1;
+        }
+
+        if (fgetc(arquivo) != EOF) {
+            fprintf(stderr, "Erro: Arquivo excede o limite de %zu bytes por envio\n",
+                    (size_t)MENSAGEM_PAYLOAD_MAX - 1);
             free(buffer_envio);
             fclose(arquivo);
             return -1;
