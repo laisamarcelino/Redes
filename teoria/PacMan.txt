@@ -1,0 +1,168 @@
+Trabalho PacMan
+•
+•
+•
+•
+
+•
+•
+
+•
+
+•
+•
+
+•
+•
+
+Implementar um jogo de Pacman “no escuro” remoto, na modalidade
+cliente-servidor
+Em duplas
+o Desconto de 20% caso não seja em dupla
+Proibido usar IA – Caso o uso de IA seja detectado o trabalho tem nota 0
+Usar o Cliente em um computador e o servidor em outro
+o Conectar os dois computadores através de um cabo de rede
+diretamente
+Valor 40,0
+o Bônus não faz a nota do trabalho ultrapassar 40 pontos na média
+Trabalho deve ser apresentado pelos dois membros da equipe
+o Entregar um relatório impresso no dia da apresentação com uma
+página com as escolhas que a equipe teve que fazer ao longo do
+desenvolvimento
+Entrega via UFPR Virtual
+o Código fonte e arquivo executável em um arquivo .tgz – nome do
+arquivo deve ser o GRR da dupla
+o Relatório em pdf
+Respeitar o protocolo de comunicação deﬁnido em sala
+Detalhes implementação:
+o Timeout é obrigatório
+o Controle de Fluxo é Para-e-espera
+o Implementação da transmissão dos arquivos das pastilhas com
+janela deslizante de tamanho 5 gera um bônus de 10%.
+Obrigatório C ou C++
+Comunicação por RAWSocket
+o RAWSocket só pode ser executado como root nas máquinas
+
+Jogo:
+•
+
+•
+•
+•
+•
+•
+•
+•
+
+•
+
+Labirinto 40x40 – carregado na memória como uma matriz de 40x40
+o O labirinto deve ser lido de um arquivo no início do servidor
+o Arquivo do labirinto é um arquivo csv com os itens separados por ;
+o Caso o usuário não forneça o labirinto, o programa deve carregar o
+labirinto padrão com as paredes com o escrito UFPR e sortear
+aleatoriamente a posição do PacMan, fantasmas, pastilhas.
+o Representações do arquivo do labirinto:
+§ P – PacMan
+§ X – Parede
+§ 0 – Espaços vazios
+§ R – fantasma vermelho
+§ B – fantasma azul
+§ G – fantasma verde
+§ Y – fantasma amarelo
+§ 1 – pastilha dourada arquivo texto (1.txt)
+§ 2 – pastilha dourada arquivo texto (2.txt)
+§ 3 – pastilha dourada arquivo jpg (3.jpg)
+§ 4 – pastilha dourada arquivo jpg (4.jpg)
+§ 5 – pastilha dourada arquivo mp4 (5.mp4)
+§ 6 – pastilha dourada arquivo mp4 (6.mp4)
+Funciona em rodadas
+A cada rodada o jogador faz um movimento
+A cada rodada o servidor calcula um movimento para cada fantasma
+PacMan deve pegar 6 pastilhas douradas para terminar a fase
+Cada pastilha dourada corresponde a um arquivo mostrando o prêmio: 2
+arquivos são texto (.txt), 2 são imagens (.jpg) e 2 são vídeos (.mp4)
+Caso o PacMan encontre um fantasma, deve enviar um arquivo mostrando
+o encontro – arquivo pode ser deﬁnido pela dupla
+A cada 5 movimentos a visualização do PacMan é expandida de 1 no raio
+o No início o PacMan só enxerga uma casa para cada lado ao seu
+redor
+Movimentos dos fantasmas:
+o Vermelho – regra da mão esquerda
+o Azul – regra da mão direita
+o Verde – alterna direita e esquerda a cada decisão que deve tomar
+o Amarelo – aleatório
+
+Cliente:
+•
+•
+•
+•
+•
+•
+
+•
+
+Computador no qual o usuário joga
+Todas as interfaces com o usuário estão no cliente
+Usuário pode escolher se mover para cima, baixo, esquerda e direita.
+Usuário só enxerga 1 casa ao redor do PacMan
+o A cada 5 rodadas a visualização aumenta
+Cliente não guarda nada, é só a interface com o usuário
+Comunicação:
+o Coleta o movimento do PacMan, cria a mensagem e envia para o
+servidor.
+o Para e ﬁca esperando a resposta do servidor
+o Resposta é o novo mapa, com a nova visualização do PacMan
+o Mostra a nova visualização na tela para o usuário
+o Caso tenha encontrado uma pastilha, deve receber o arquivo e
+mostrar para o usuário
+o Mensagens do cliente para o servidor tem tamanho ﬁxo
+A cada rodada mostra o mapa na tela para o usuário
+
+Servidor:
+•
+•
+•
+•
+•
+•
+
+•
+
+•
+
+•
+
+Cria / Carrega o mapa inicial
+Conhece todo o tabuleiro
+Conecta o Cliente
+Envia a visualização inicial para o cliente
+Espera receber movimentações
+Controla os fantasmas.
+o Verde – Anda em espiral sentido horário
+o Azul – Anda em espiral sentido anti-horário
+o Vermelho – Regra da mão esquerda
+o Amarelo – Regra da mão direita
+A cada rodada:
+o deve receber o movimento do PacMan
+o calcular a nova posição do PacMan
+o calcular os movimentos dos fantasmas
+o gerar a nova visualização do PacMan
+o enviar a nova visualização para o cliente – pode ser mais de uma
+mensagem
+o se achou pastilha – envia o arquivo correspondente para o cliente
+Comunicação
+o Recebe a mensagem com a movimentação do PacMan
+o Calcula o novo mapa
+o Gera a nova visualização do PacMan
+o Cria a mensagem e envia para o cliente com a visualização atual
+o Caso o PacMan tenha encontrado uma pastilha ou um fantasma
+deve enviar o arquivo correspondente.
+o Mensagens do servidor para o cliente tem tamanho variável
+§ Se for a nova visualização, ela aumenta a cada 5 jogadas
+§ Se for os arquivos, eles podem ter tamanhos desde algumas
+centenas de bytes até alguns megabytes
+Log mas mensagens recebidas e enviadas em uma janela separada.
+
+
