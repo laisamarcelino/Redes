@@ -1,43 +1,78 @@
-#include "../include/network.h"
-#include <string.h>
-#include <net/if.h>
+#define _GNU_SOURCE
+#define _POSIX_C_SOURCE 200809L
 
-// Verifica se uma interface é wireless (Wi-Fi)
-static int eh_wireless(const char *nome_interface) {
-    // Verifica se o nome começa com padrões conhecidos de wireless
-    if (strncmp(nome_interface, "wlan", 4) == 0 ||  // wlan0, wlan1, etc
-        strncmp(nome_interface, "wlp", 3) == 0 ||   // wlp3s0, etc
-        strncmp(nome_interface, "wlx", 3) == 0 ||   // wlx00112233aabb, etc
-        strncmp(nome_interface, "ww", 2) == 0)      // ww0, etc
+#include "../include/network.h"
+
+#include <arpa/inet.h>
+#include <errno.h>
+#include <ifaddrs.h>
+#include <linux/if_packet.h>
+#include <net/ethernet.h>
+#include <net/if.h>
+#include <netinet/ether.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+/*
+ * * Correção: define um EtherType próprio para o projeto.
+ * Com isso o servidor deixa de processar ARP, IPv6 e outros pacotes da rede.
+ */
+#define ETH_P_PACMAN 0x88B5
+
+/*
+ * * Guarda dados da interface configurada.
+ * envia_mensagem() usa essas informações para montar o quadro Ethernet.
+ */
+static int g_ifindex = 0;
+static unsigned char g_mac_origem[ETH_ALEN];
+
+// Verifica se uma interface é wireless pelo padrão mais comum de nomes Linux.
+static int eh_wireless(const char *nome_interface)
+{
+    if (strncmp(nome_interface, "wlan", 4) == 0 ||
+        strncmp(nome_interface, "wlp", 3) == 0 ||
+        strncmp(nome_interface, "wlx", 3) == 0 ||
+        strncmp(nome_interface, "ww", 2) == 0)
     {
         return 1;
     }
     return 0;
 }
 
-// Seleciona a interface de rede (cabo Ethernet ou loopback)
-// Retorna: nome da interface alocado (deve ser liberado com free()) ou NULL
-// allow_loopback: 1 para selecionar loopback, 0 para selecionar cabo (Ethernet)
-char* seleciona_interface_rede(int allow_loopback) {
-    struct ifaddrs *ifaddr, *ifa;
+// Seleciona a interface de rede Ethernet ou loopback.
+char *seleciona_interface_rede(int allow_loopback)
+{
+    struct ifaddrs *ifaddr = NULL;
+    struct ifaddrs *ifa = NULL;
     char *interface_selecionada = NULL;
 
     // Carrega a lista de interfaces do sistema
-    if (getifaddrs(&ifaddr) == -1) {
+    if (getifaddrs(&ifaddr) == -1)
+    {
         perror("getifaddrs");
         return NULL;
     }
 
     // Percorre todas as interfaces até achar a desejada
-    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next)
+    {
         if (ifa->ifa_addr == NULL)
+        {
             continue;
+        }
 
-        // Modo teste: seleciona apenas a interface loopback
-        if (allow_loopback) {
-            if (strcmp(ifa->ifa_name, "lo") == 0) {
+        // Em teste local, seleciona apenas a interface loopback.
+        if (allow_loopback)
+        {
+            if (strcmp(ifa->ifa_name, "lo") == 0 && ifa->ifa_addr->sa_family == AF_PACKET)
+            {
                 interface_selecionada = malloc(strlen(ifa->ifa_name) + 1);
-                if (interface_selecionada) {
+                if (interface_selecionada != NULL)
+                {
                     strcpy(interface_selecionada, ifa->ifa_name);
                 }
                 break;
@@ -45,18 +80,18 @@ char* seleciona_interface_rede(int allow_loopback) {
             continue;
         }
 
-        // Modo normal: ignora loopback
-        if (strcmp(ifa->ifa_name, "lo") == 0)
+        // Em uso real, ignora loopback e interfaces wireless.
+        if (strcmp(ifa->ifa_name, "lo") == 0 || eh_wireless(ifa->ifa_name))
+        {
             continue;
-
-        // Ignora interfaces wireless
-        if (eh_wireless(ifa->ifa_name))
-            continue;
+        }
 
         // Seleciona a primeira interface de enlace disponível
-        if (ifa->ifa_addr->sa_family == AF_PACKET) {
+        if (ifa->ifa_addr->sa_family == AF_PACKET)
+        {
             interface_selecionada = malloc(strlen(ifa->ifa_name) + 1);
-            if (interface_selecionada) {
+            if (interface_selecionada != NULL)
+            {
                 strcpy(interface_selecionada, ifa->ifa_name);
             }
             break;
@@ -66,112 +101,245 @@ char* seleciona_interface_rede(int allow_loopback) {
     // Libera a lista de interfaces do sistema
     freeifaddrs(ifaddr);
 
-    if (interface_selecionada == NULL) {
+    if (interface_selecionada == NULL)
+    {
         // Informa falha caso nenhuma interface compatível tenha sido encontrada
-        if (allow_loopback) {
+        if (allow_loopback)
+        {
             fprintf(stderr, "Erro: nenhuma interface loopback encontrada\n");
-        } else {
-            fprintf(stderr, "Erro: nenhuma interface de cabo (Ethernet) encontrada\n");
+        }
+        else
+        {
+            fprintf(stderr, "Erro: nenhuma interface de cabo Ethernet encontrada\n");
         }
         return NULL;
     }
 
     // Retorna o nome da interface escolhida
     printf("Interface de rede selecionada: %s\n", interface_selecionada);
-
     return interface_selecionada;
 }
 
-int cria_raw_socket(char* nome_interface_rede) {
-    // Cria um socket de camada de enlace para capturar/envio de quadros.
-    // Nota: originalmente usávamos `SOCK_RAW` aqui, que fornece quadros
-    // incluindo cabeçalhos Ethernet. Contudo, enviar apenas payload com
-    // `send()` em muitos kernels resulta em `EINVAL`. Para facilitar o
-    // envio/recepção de payload puro (sem cabeçalho) usamos `SOCK_DGRAM`.
-    // Linha comentada com a versão original `SOCK_RAW` mantida abaixo.
-    // int soquete = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
-    int soquete = socket(AF_PACKET, SOCK_DGRAM, htons(ETH_P_ALL));
-    if (soquete == -1) {
+// * Obtém o MAC da interface para preencher o endereço de origem do quadro.
+static int obtem_mac_interface(int soquete, const char *nome_interface, unsigned char mac[ETH_ALEN])
+{
+    struct ifreq ifr;
+    memset(&ifr, 0, sizeof(ifr));
+
+    strncpy(ifr.ifr_name, nome_interface, IFNAMSIZ - 1);
+    if (ioctl(soquete, SIOCGIFHWADDR, &ifr) == -1)
+    {
+        perror("ioctl(SIOCGIFHWADDR)");
+        return -1;
+    }
+
+    memcpy(mac, ifr.ifr_hwaddr.sa_data, ETH_ALEN);
+    return 0;
+}
+
+int cria_raw_socket(char *nome_interface_rede)
+{
+    if (nome_interface_rede == NULL)
+    {
+        fprintf(stderr, "Erro: interface de rede nula\n");
+        return -1;
+    }
+
+    /*
+     * * Correção: usa SOCK_RAW e monta o cabeçalho Ethernet completo.
+     * O envio deixa de depender de payload solto via send().
+     */
+    int soquete = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_PACMAN));
+    if (soquete == -1)
+    {
         fprintf(stderr, "Erro ao criar socket: verifique se você é root!\n");
+        perror("socket");
         return -1;
     }
 
     // Converte o nome da interface para índice
-    int ifindex = if_nametoindex(nome_interface_rede);
-    if (ifindex == 0) {
+    int ifindex = (int)if_nametoindex(nome_interface_rede);
+    if (ifindex == 0)
+    {
         fprintf(stderr, "Erro: interface de rede inválida: %s\n", nome_interface_rede);
         close(soquete);
         return -1;
     }
 
+    if (obtem_mac_interface(soquete, nome_interface_rede, g_mac_origem) == -1)
+    {
+        close(soquete);
+        return -1;
+    }
+    g_ifindex = ifindex;
+
     // Prepara o endereço da interface escolhida
-    struct sockaddr_ll endereco = {0};
+    struct sockaddr_ll endereco;
+    memset(&endereco, 0, sizeof(endereco));
     endereco.sll_family = AF_PACKET;
-    endereco.sll_protocol = htons(ETH_P_ALL);
+    endereco.sll_protocol = htons(ETH_P_PACMAN);
     endereco.sll_ifindex = ifindex;
 
     // Faz bind do socket na interface selecionada
-    if (bind(soquete, (struct sockaddr*) &endereco, sizeof(endereco)) == -1) {
-        fprintf(stderr, "Erro ao fazer bind no socket\n");
+    if (bind(soquete, (struct sockaddr *)&endereco, sizeof(endereco)) == -1)
+    {
+        perror("bind");
         close(soquete);
         return -1;
     }
 
-    // Ativa o modo promíscuo para receber quadros não reconhecidos pelo SO
-    struct packet_mreq mr = {0};
+    // * Mantém modo promíscuo para facilitar testes e capturas em laboratório.
+    struct packet_mreq mr;
+    memset(&mr, 0, sizeof(mr));
     mr.mr_ifindex = ifindex;
     mr.mr_type = PACKET_MR_PROMISC;
 
-    if (setsockopt(soquete, SOL_PACKET, PACKET_ADD_MEMBERSHIP, &mr, sizeof(mr)) == -1) {
-        fprintf(stderr, "Erro ao ativar modo promíscuo\n");
+    if (setsockopt(soquete, SOL_PACKET, PACKET_ADD_MEMBERSHIP, &mr, sizeof(mr)) == -1)
+    {
+        perror("setsockopt(PACKET_ADD_MEMBERSHIP)");
         close(soquete);
         return -1;
     }
+
+    printf("MAC de origem: %02x:%02x:%02x:%02x:%02x:%02x\n",
+           g_mac_origem[0], g_mac_origem[1], g_mac_origem[2],
+           g_mac_origem[3], g_mac_origem[4], g_mac_origem[5]);
 
     return soquete;
 }
 
-// Fica bloqueado esperando uma mensagem chegar no socket
-ssize_t espera_mensagem_servidor(int soquete, unsigned char *buffer, size_t tamanho_buffer) {
-    struct sockaddr_ll endereco_origem = {0};
-    socklen_t tamanho_endereco = sizeof(endereco_origem);
+// * Espera um quadro do protocolo PacMan e entrega apenas o payload.
+ssize_t espera_mensagem_servidor(int soquete, unsigned char *buffer, size_t tamanho_buffer)
+{
+    unsigned char quadro[TAM_BUFFER_RAW];
+    struct sockaddr_ll endereco_origem;
+    socklen_t tamanho_endereco;
 
-    while (1) {
+    while (1)
+    {
+        memset(&endereco_origem, 0, sizeof(endereco_origem));
+        tamanho_endereco = sizeof(endereco_origem);
+
         ssize_t recebido = recvfrom(soquete,
-                                    buffer,
-                                    tamanho_buffer,
+                                    quadro,
+                                    sizeof(quadro),
                                     0,
-                                    (struct sockaddr *) &endereco_origem,
+                                    (struct sockaddr *)&endereco_origem,
                                     &tamanho_endereco);
 
-        if (recebido <= 0) return recebido;
+        if (recebido <= 0)
+        {
+            return recebido;
+        }
 
-        // Ignora cópias de pacotes originados localmente (evita duplicação)
-        // Tipos possíveis: PACKET_HOST, PACKET_BROADCAST, PACKET_MULTICAST,
-        // PACKET_OTHERHOST, PACKET_OUTGOING
-        if (endereco_origem.sll_pkttype == PACKET_OUTGOING) {
+        // * Ignora cópias locais do próprio pacote enviado.
+        if (endereco_origem.sll_pkttype == PACKET_OUTGOING)
+        {
             continue;
         }
 
-        return recebido;
+        if ((size_t)recebido < sizeof(struct ether_header))
+        {
+            continue;
+        }
+
+        struct ether_header *eth = (struct ether_header *)quadro;
+
+        // * Descarta tudo que não tenha o EtherType do projeto.
+        if (ntohs(eth->ether_type) != ETH_P_PACMAN)
+        {
+            continue;
+        }
+
+        size_t tamanho_payload = (size_t)recebido - sizeof(struct ether_header);
+        if (tamanho_payload > tamanho_buffer)
+        {
+            tamanho_payload = tamanho_buffer;
+        }
+
+        memcpy(buffer, quadro + sizeof(struct ether_header), tamanho_payload);
+        return (ssize_t)tamanho_payload;
     }
 }
 
-// Envia uma mensagem pelo socket já configurado
-ssize_t envia_mensagem(int soquete, const unsigned char *buffer, size_t tamanho_buffer) {
-    return send(soquete, buffer, tamanho_buffer, 0);
+// * Envia uma mensagem montando um quadro Ethernet completo.
+ssize_t envia_mensagem(int soquete, const unsigned char *buffer, size_t tamanho_buffer)
+{
+    if (buffer == NULL || tamanho_buffer == 0)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (g_ifindex == 0)
+    {
+        fprintf(stderr, "Erro: socket ainda não possui interface configurada\n");
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (sizeof(struct ether_header) + tamanho_buffer > TAM_BUFFER_RAW)
+    {
+        fprintf(stderr, "Erro: mensagem grande demais para o buffer raw\n");
+        errno = EMSGSIZE;
+        return -1;
+    }
+
+    unsigned char quadro[TAM_BUFFER_RAW];
+    memset(quadro, 0, sizeof(quadro));
+
+    struct ether_header *eth = (struct ether_header *)quadro;
+
+    /*
+     * * Correção: usa broadcast como MAC destino no primeiro teste por cabo.
+     * Assim não é necessário descobrir o MAC da outra máquina nesta etapa.
+     */
+    memset(eth->ether_dhost, 0xff, ETH_ALEN);
+    memcpy(eth->ether_shost, g_mac_origem, ETH_ALEN);
+    eth->ether_type = htons(ETH_P_PACMAN);
+
+    memcpy(quadro + sizeof(struct ether_header), buffer, tamanho_buffer);
+
+    struct sockaddr_ll endereco_destino;
+    memset(&endereco_destino, 0, sizeof(endereco_destino));
+    endereco_destino.sll_family = AF_PACKET;
+    endereco_destino.sll_ifindex = g_ifindex;
+    endereco_destino.sll_halen = ETH_ALEN;
+    memset(endereco_destino.sll_addr, 0xff, ETH_ALEN);
+
+    size_t tamanho_quadro = sizeof(struct ether_header) + tamanho_buffer;
+    ssize_t enviado = sendto(soquete,
+                             quadro,
+                             tamanho_quadro,
+                             0,
+                             (struct sockaddr *)&endereco_destino,
+                             sizeof(endereco_destino));
+
+    if (enviado < 0)
+    {
+        return enviado;
+    }
+
+    if ((size_t)enviado < sizeof(struct ether_header))
+    {
+        errno = EIO;
+        return -1;
+    }
+
+    return enviado - (ssize_t)sizeof(struct ether_header);
 }
 
-// Responde ao cliente com a mensagem "ok"
-ssize_t responde_cliente_ok(int soquete) {
-    unsigned char resposta[14] = {0};
-    resposta[0] = 'o';
-    resposta[1] = 'k';
-    return envia_mensagem(soquete, resposta, sizeof(resposta));
+// Responde ao cliente com a mensagem "ok".
+ssize_t responde_cliente_ok(int soquete)
+{
+    const unsigned char resposta[] = "ok\n";
+    return envia_mensagem(soquete, resposta, sizeof(resposta) - 1);
 }
 
-int fecha_raw_socket(int soquete) {
-    if (close(soquete) == -1) {
+int fecha_raw_socket(int soquete)
+{
+    if (close(soquete) == -1)
+    {
         fprintf(stderr, "Erro ao fechar socket\n");
         return -1;
     }

@@ -4,10 +4,9 @@
 #include "../include/network.h"
 
 #include <errno.h>
-#include <stdio.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
-#include <ctype.h>
 
 #define TAM_BUFFER_ESCUTA 2048
 
@@ -27,6 +26,8 @@ int executa_servidor(int soquete) {
     size_t tamanho_mensagem = 0;
     size_t capacidade_mensagem = 0;
 
+    printf("Servidor aguardando mensagens do protocolo PacMan...\n");
+
     while (1) {
         ssize_t recebido = espera_mensagem_servidor(soquete, buffer, sizeof(buffer));
         if (recebido < 0) {
@@ -42,34 +43,12 @@ int executa_servidor(int soquete) {
             continue;
         }
 
-        /* Filtra pacotes que claramente não são texto legível para reduzir
-           o ruído quando o socket captura tráfego do sistema. Aceitamos
-           apenas payloads com uma proporção razoável de caracteres
-           imprimíveis e que contenham letra ou '\n'. */
-        size_t rlen = (size_t) recebido;
-        size_t imprimiveis = 0;
-        int tem_letra = 0;
-        for (size_t i = 0; i < rlen; ++i) {
-            unsigned char c = buffer[i];
-            if (c == '\n') {
-                imprimiveis++;
-                tem_letra = 1;
-                continue;
-            }
-            if (isprint(c) || c == '\t' || c == '\r') {
-                imprimiveis++;
-            }
-            if (isalpha(c)) tem_letra = 1;
-            if (c == '\0') { imprimiveis = 0; tem_letra = 0; break; }
-        }
-        if (rlen == 0) continue;
-        double proporcao = (double) imprimiveis / (double) rlen;
-        if (proporcao < 0.6 || !tem_letra) {
-            // Ignora payloads binários/ruído
-            continue;
-        }
+        /*
+         * * CORRECAO: o filtro por texto legível foi removido.
+         * Agora network.c já entrega apenas quadros com o EtherType do projeto.
+         */
         if (tamanho_mensagem + (size_t) recebido > capacidade_mensagem) {
-            // Cresce o buffer de forma simples quando a mensagem não couber mais.
+            // * Cresce o buffer quando a mensagem não couber mais.
             size_t nova_capacidade = capacidade_mensagem == 0 ? 1024 : capacidade_mensagem;
             while (tamanho_mensagem + (size_t) recebido > nova_capacidade) {
                 nova_capacidade *= 2;
@@ -93,6 +72,7 @@ int executa_servidor(int soquete) {
         unsigned char *fim_linha = memchr(mensagem, '\n', tamanho_mensagem);
         if (fim_linha != NULL) {
             size_t tamanho_para_imprimir = (size_t) (fim_linha - mensagem) + 1;
+            printf("Mensagem recebida: ");
             imprime_mensagem_recebida(mensagem, tamanho_para_imprimir);
             free(mensagem);
             mensagem = NULL;

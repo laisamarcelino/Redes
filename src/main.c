@@ -7,13 +7,18 @@
 #include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 // Mostra a forma correta de uso do programa.
 static void mostra_uso(const char *programa) {
-    fprintf(stderr, "Uso: %s -c \"mensagem\" | -s [-l]\n", programa);
-    fprintf(stderr, "  -c  modo cliente\n");
+    fprintf(stderr, "Uso:\n");
+    fprintf(stderr, "  %s -s [-l] [-i interface]\n", programa);
+    fprintf(stderr, "  %s -c \"mensagem\" [-l] [-i interface]\n", programa);
+    fprintf(stderr, "\nOpcoes:\n");
+    fprintf(stderr, "  -c  modo cliente, enviando a mensagem informada\n");
     fprintf(stderr, "  -s  modo servidor\n");
-    fprintf(stderr, "  -l  permite loopback para testes\n");
+    fprintf(stderr, "  -l  permite loopback para testes locais\n");
+    fprintf(stderr, "  -i  escolhe manualmente a interface de rede. Ex: enp3s0, eth0, lo\n");
 }
 
 // Seleciona o modo cliente ou servidor e abre o socket na interface correta.
@@ -22,11 +27,14 @@ int main(int argc, char **argv) {
     int modo_servidor = 0;
     int permite_loopback = 0;
     char *mensagem_cliente = NULL;
+    char *interface_manual = NULL;
 
     int opcao;
-    /* -c aceita um argumento (mensagem). Permite que -l seja passado em
-       qualquer posição porque getopt consome o argumento de -c automaticamente. */
-    while ((opcao = getopt(argc, argv, "c:slh")) != -1) {
+    /*
+     * * CORRECAO: adiciona -i para escolher a interface manualmente.
+     * Isso evita selecionar Docker, bridge, VPN ou outra interface errada.
+     */
+    while ((opcao = getopt(argc, argv, "c:si:lh")) != -1) {
         switch (opcao) {
             case 'c':
                 modo_cliente = 1;
@@ -34,6 +42,9 @@ int main(int argc, char **argv) {
                 break;
             case 's':
                 modo_servidor = 1;
+                break;
+            case 'i':
+                interface_manual = optarg;
                 break;
             case 'l':
                 permite_loopback = 1;
@@ -56,9 +67,21 @@ int main(int argc, char **argv) {
     }
 
     // Escolhe a interface de rede e abre o raw socket nela.
-    char *interface_rede = seleciona_interface_rede(permite_loopback);
-    if (interface_rede == NULL) {
-        return 1;
+    // * Usa a interface passada por -i ou escolhe automaticamente.
+    char *interface_rede = NULL;
+    if (interface_manual != NULL) {
+        interface_rede = malloc(strlen(interface_manual) + 1);
+        if (interface_rede == NULL) {
+            fprintf(stderr, "Erro ao alocar nome da interface\n");
+            return 1;
+        }
+        strcpy(interface_rede, interface_manual);
+        printf("Interface de rede informada manualmente: %s\n", interface_rede);
+    } else {
+        interface_rede = seleciona_interface_rede(permite_loopback);
+        if (interface_rede == NULL) {
+            return 1;
+        }
     }
 
     int soquete = cria_raw_socket(interface_rede);
