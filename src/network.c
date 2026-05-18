@@ -43,6 +43,32 @@ static int eh_wireless(const char *nome_interface)
     return 0;
 }
 
+// Verifica interfaces virtuais comuns que nao representam o cabo Ethernet.
+static int eh_virtual(const char *nome_interface)
+{
+    if (strcmp(nome_interface, "docker0") == 0 ||
+        strncmp(nome_interface, "br-", 3) == 0 ||
+        strncmp(nome_interface, "veth", 4) == 0 ||
+        strncmp(nome_interface, "virbr", 5) == 0 ||
+        strncmp(nome_interface, "tun", 3) == 0 ||
+        strncmp(nome_interface, "tap", 3) == 0)
+    {
+        return 1;
+    }
+    return 0;
+}
+
+// Verifica os padroes mais comuns de nomes para Ethernet fisica no Linux.
+static int eh_ethernet(const char *nome_interface)
+{
+    if (strncmp(nome_interface, "eth", 3) == 0 ||
+        strncmp(nome_interface, "en", 2) == 0)
+    {
+        return 1;
+    }
+    return 0;
+}
+
 // Seleciona a interface de rede Ethernet ou loopback.
 char *seleciona_interface_rede(int allow_loopback)
 {
@@ -80,22 +106,32 @@ char *seleciona_interface_rede(int allow_loopback)
             continue;
         }
 
-        // Em uso real, ignora loopback e interfaces wireless.
-        if (strcmp(ifa->ifa_name, "lo") == 0 || eh_wireless(ifa->ifa_name))
+        if (ifa->ifa_addr->sa_family != AF_PACKET)
+        {
+            continue;
+        }
+
+        // Em uso real, ignora loopback, wireless e interfaces virtuais.
+        if (strcmp(ifa->ifa_name, "lo") == 0 ||
+            eh_wireless(ifa->ifa_name) ||
+            eh_virtual(ifa->ifa_name) ||
+            !eh_ethernet(ifa->ifa_name))
+        {
+            continue;
+        }
+
+        if ((ifa->ifa_flags & IFF_UP) == 0)
         {
             continue;
         }
 
         // Seleciona a primeira interface de enlace disponível
-        if (ifa->ifa_addr->sa_family == AF_PACKET)
+        interface_selecionada = malloc(strlen(ifa->ifa_name) + 1);
+        if (interface_selecionada != NULL)
         {
-            interface_selecionada = malloc(strlen(ifa->ifa_name) + 1);
-            if (interface_selecionada != NULL)
-            {
-                strcpy(interface_selecionada, ifa->ifa_name);
-            }
-            break;
+            strcpy(interface_selecionada, ifa->ifa_name);
         }
+        break;
     }
 
     // Libera a lista de interfaces do sistema
