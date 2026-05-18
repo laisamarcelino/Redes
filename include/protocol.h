@@ -15,7 +15,7 @@
 #define TIPO_MAX 31          // *5 bits: valores de 0 a 31
 
 #define TAMANHO_CABECALHO_PROTOCOLO 3 // *8+5+6+5 bits = 24 bits = 3 bytes
-#define TAMANHO_CRC_PROTOCOLO 1 // ALTERAR
+#define TAMANHO_CRC_PROTOCOLO 1 // 8 bits = 1 byte
 
 typedef enum
 {
