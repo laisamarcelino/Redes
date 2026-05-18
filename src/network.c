@@ -301,12 +301,17 @@ ssize_t espera_mensagem_servidor(int soquete, unsigned char *buffer, size_t tama
 // * Envia uma mensagem montando um quadro Ethernet completo.
 ssize_t envia_mensagem(int soquete, const unsigned char *buffer, size_t tamanho_buffer)
 {
+    // Nao ha o que enviar se o ponteiro for nulo ou o payload estiver vazio.
     if (buffer == NULL || tamanho_buffer == 0)
     {
         errno = EINVAL;
         return -1;
     }
 
+    /*
+     * g_ifindex e g_mac_origem sao preenchidos em cria_raw_socket().
+     * Sem esse indice nao sabemos por qual placa de rede o quadro deve sair.
+     */
     if (g_ifindex == 0)
     {
         fprintf(stderr, "Erro: socket ainda não possui interface configurada\n");
@@ -314,6 +319,11 @@ ssize_t envia_mensagem(int soquete, const unsigned char *buffer, size_t tamanho_
         return -1;
     }
 
+    /*
+     * O quadro Ethernet final contem:
+     *   cabecalho Ethernet + payload recebido em buffer.
+     * TAM_BUFFER_RAW limita o tamanho total que esta funcao consegue montar.
+     */
     if (sizeof(struct ether_header) + tamanho_buffer > TAM_BUFFER_RAW)
     {
         fprintf(stderr, "Erro: mensagem grande demais para o buffer raw\n");
@@ -327,23 +337,39 @@ ssize_t envia_mensagem(int soquete, const unsigned char *buffer, size_t tamanho_
     struct ether_header *eth = (struct ether_header *)quadro;
 
     /*
-     * * Correção: usa broadcast como MAC destino no primeiro teste por cabo.
+     * * CORRECAO: usa broadcast como MAC destino no primeiro teste por cabo.
      * Assim não é necessário descobrir o MAC da outra máquina nesta etapa.
+     * ff:ff:ff:ff:ff:ff faz a placa enviar o quadro para todos no enlace local.
      */
     memset(eth->ether_dhost, 0xff, ETH_ALEN);
+
+    // MAC de origem: endereco fisico da interface escolhida no socket.
     memcpy(eth->ether_shost, g_mac_origem, ETH_ALEN);
+
+    /*
+     * EtherType identifica o "protocolo" carregado no quadro.
+     * htons() converte para ordem de bytes de rede, como o Ethernet espera.
+     */
     eth->ether_type = htons(ETH_P_PACMAN);
 
+    // Copia a mensagem logo apos o cabecalho Ethernet.
     memcpy(quadro + sizeof(struct ether_header), buffer, tamanho_buffer);
 
     struct sockaddr_ll endereco_destino;
     memset(&endereco_destino, 0, sizeof(endereco_destino));
+
+    /*
+     * sockaddr_ll informa ao kernel que este envio e de camada 2 (AF_PACKET),
+     * por qual interface fisica deve sair e qual endereco MAC sera usado.
+     */
     endereco_destino.sll_family = AF_PACKET;
     endereco_destino.sll_ifindex = g_ifindex;
     endereco_destino.sll_halen = ETH_ALEN;
     memset(endereco_destino.sll_addr, 0xff, ETH_ALEN);
 
     size_t tamanho_quadro = sizeof(struct ether_header) + tamanho_buffer;
+
+    // sendto() envia o quadro Ethernet ja montado.
     ssize_t enviado = sendto(soquete,
                              quadro,
                              tamanho_quadro,
@@ -356,12 +382,14 @@ ssize_t envia_mensagem(int soquete, const unsigned char *buffer, size_t tamanho_
         return enviado;
     }
 
+    // Se nem o cabecalho inteiro foi aceito como enviado, o envio e invalido.
     if ((size_t)enviado < sizeof(struct ether_header))
     {
         errno = EIO;
         return -1;
     }
 
+    // A interface publica da funcao retorna apenas quantos bytes de payload sairam.
     return enviado - (ssize_t)sizeof(struct ether_header);
 }
 
