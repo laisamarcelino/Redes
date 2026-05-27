@@ -5,11 +5,12 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* ACKs temporariamente desativados: não aguardamos confirmação do servidor. */
 
-// Envia a mensagem inteira de uma vez, sem cabeçalho e sem fragmentação.
+// Envia a mensagem inteira de uma vez, sem cabeçalho de protocolo e sem fragmentação.
 static int envia_mensagem_completa(int soquete, const char *mensagem) {
     size_t len = strlen(mensagem);
     int termina_com_nova_linha = (len > 0 && mensagem[len - 1] == '\n');
