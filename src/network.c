@@ -1,7 +1,7 @@
 #define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
-#include "../include/network.h"
+#include "network.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
