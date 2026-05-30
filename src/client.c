@@ -12,6 +12,8 @@
 #define TIMEOUT_ACK_MS 1000
 #define MAX_TENTATIVAS_ENVIO 5
 
+static int espera_ack_nack_com_timeout(int soquete, uint8_t sequencia_esperada);
+
 /* ===================================================================
                          FUNÇÕES AUXILIARES
 ======================================================================*/
@@ -96,7 +98,7 @@ static int envia_mensagem_protocolada(int soquete, const char *texto)
             return -1;
         }
 
-        int resposta = espera_resposta_controle_com_timeout(
+        int resposta = espera_ack_nack_com_timeout(
             soquete,
             mensagem.num_sequencia_msg);
 
@@ -139,7 +141,7 @@ static int envia_mensagem_protocolada(int soquete, const char *texto)
     return -1;
 }
 
-static int espera_resposta_ack_nack_com_timeout( int soquete, uint8_t sequencia_esperada)
+static int espera_ack_nack_com_timeout(int soquete, uint8_t sequencia_esperada)
 {
     uint8_t pacote_resposta[TAMANHO_MAX_PACOTE];
     mensagem_t resposta;
@@ -225,33 +227,6 @@ int executa_cliente(int soquete, const char *mensagem)
         return -1;
     }
 
-    // Envia a mensagem usando o protocolo PacMan
-    if (envia_mensagem_protocolada(soquete, mensagem) != 0)
-    {
-        return -1;
-    }
-
-    // Aguarda a resposta de controle do servidor
-    int resposta = espera_ack_nack(
-        soquete,
-        0);
-
-    // ACK encerra o envio
-    if (resposta == MSG_ACK)
-    {
-        printf("[DEBUG] Envio confirmado\n");
-        return 0;
-    }
-    // NACK indica que a mensagem deveria ser reenviada
-    else if (resposta == MSG_NACK)
-    {
-        fprintf(stderr, "[ERRO] Servidor pediu reenvio\n");
-        return -1;
-    }
-    // Qualquer outro retorno indica erro de espera
-    else
-    {
-        fprintf(stderr, "[ERRO] Falha ao esperar resposta\n");
-        return -1;
-    }
+    // Envia a mensagem e trata ACK, NACK e timeout.
+    return envia_mensagem_protocolada(soquete, mensagem);
 }

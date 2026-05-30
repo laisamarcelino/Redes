@@ -551,15 +551,35 @@ ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
             continue;
         }
 
+        unsigned char *payload = quadro + sizeof(struct ether_header);
         size_t tamanho_payload = (size_t)recebido - sizeof(struct ether_header);
 
-        if (tamanho_payload > tamanho_buffer)
+        if (tamanho_payload < TAMANHO_CABECALHO_PROTOCOLO + TAMANHO_CRC_PROTOCOLO)
         {
-            tamanho_payload = tamanho_buffer;
+            continue;
         }
 
-        memcpy(buffer, quadro + sizeof(struct ether_header), tamanho_payload);
+        if (payload[0] != MARCADOR_INICIO)
+        {
+            continue;
+        }
 
-        return (ssize_t)tamanho_payload;
+        uint8_t tamanho_dados = (payload[1] >> 3) & 0x1F;
+        size_t tamanho_pacote = TAMANHO_CABECALHO_PROTOCOLO + tamanho_dados + TAMANHO_CRC_PROTOCOLO;
+
+        if (tamanho_pacote > tamanho_payload)
+        {
+            continue;
+        }
+
+        if (tamanho_pacote > tamanho_buffer)
+        {
+            errno = EMSGSIZE;
+            return -1;
+        }
+
+        memcpy(buffer, payload, tamanho_pacote);
+
+        return (ssize_t)tamanho_pacote;
     }
 }
