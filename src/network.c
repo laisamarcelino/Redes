@@ -19,13 +19,13 @@
 #include <unistd.h>
 
 /*
- * * Correção: define um EtherType próprio para o projeto.
- * Com isso o servidor deixa de processar ARP, IPv6 e outros pacotes da rede.
+ * Define um EtherType próprio para o projeto
+ * Com isso o servidor deixa de processar ARP, IPv6 e outros pacotes da rede
  */
 #define ETH_P_PACMAN 0x88B5
 
 /*
- * * Guarda dados da interface configurada.
+ * Guarda dados da interface configurada.
  * envia_mensagem() usa essas informações para montar o quadro Ethernet.
  */
 static int g_ifindex = 0;
@@ -183,7 +183,8 @@ int cria_raw_socket(char *nome_interface_rede)
     }
 
     /*
-     * * Correção: usa SOCK_RAW e monta o cabeçalho Ethernet completo.
+     * APAGAR
+     * Usa SOCK_RAW e monta o cabeçalho Ethernet completo.
      * O envio deixa de depender de payload solto via send().
      */
     int soquete = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_PACMAN));
@@ -225,7 +226,7 @@ int cria_raw_socket(char *nome_interface_rede)
         return -1;
     }
 
-    // * Mantém modo promíscuo para facilitar testes e capturas em laboratório.
+    // Mantém modo promíscuo para facilitar testes e capturas em laboratório.
     struct packet_mreq mr;
     memset(&mr, 0, sizeof(mr));
     mr.mr_ifindex = ifindex;
@@ -245,7 +246,7 @@ int cria_raw_socket(char *nome_interface_rede)
     return soquete;
 }
 
-// * Espera um quadro do protocolo PacMan e entrega apenas o payload.
+// Espera um quadro do protocolo PacMan e entrega apenas o payload.
 ssize_t espera_mensagem_servidor(int soquete, unsigned char *buffer, size_t tamanho_buffer)
 {
     unsigned char quadro[TAM_BUFFER_RAW];
@@ -269,7 +270,7 @@ ssize_t espera_mensagem_servidor(int soquete, unsigned char *buffer, size_t tama
             return recebido;
         }
 
-        // * Ignora cópias locais do próprio pacote enviado.
+        // Ignora cópias locais do próprio pacote enviado.
         if (endereco_origem.sll_pkttype == PACKET_OUTGOING)
         {
             continue;
@@ -282,7 +283,7 @@ ssize_t espera_mensagem_servidor(int soquete, unsigned char *buffer, size_t tama
 
         struct ether_header *eth = (struct ether_header *)quadro;
 
-        // * Descarta tudo que não tenha o EtherType do projeto.
+        // Descarta tudo que não tenha o EtherType do projeto.
         if (ntohs(eth->ether_type) != ETH_P_PACMAN)
         {
             continue;
@@ -320,7 +321,7 @@ ssize_t espera_mensagem_servidor(int soquete, unsigned char *buffer, size_t tama
     }
 }
 
-// * Envia uma mensagem montando um quadro Ethernet completo.
+// Envia uma mensagem montando um quadro Ethernet completo.
 ssize_t envia_mensagem(int soquete, const unsigned char *buffer, size_t tamanho_buffer)
 {
     // Nao ha o que enviar se o ponteiro for nulo ou o payload estiver vazio.
@@ -359,7 +360,7 @@ ssize_t envia_mensagem(int soquete, const unsigned char *buffer, size_t tamanho_
     struct ether_header *eth = (struct ether_header *)quadro;
 
     /*
-     * * CORRECAO: usa broadcast como MAC destino no primeiro teste por cabo.
+     * Usa broadcast como MAC destino no primeiro teste por cabo.
      * Assim não é necessário descobrir o MAC da outra máquina nesta etapa.
      * ff:ff:ff:ff:ff:ff faz a placa enviar o quadro para todos no enlace local.
      */
