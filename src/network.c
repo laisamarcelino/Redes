@@ -448,6 +448,7 @@ int fecha_raw_socket(int soquete)
 ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
                                 size_t tamanho_buffer, int timeout_ms)
 {
+    // Buffer temporario para o quadro Ethernet completo.
     unsigned char quadro[TAM_BUFFER_RAW];
     struct sockaddr_ll endereco_origem;
     socklen_t tamanho_endereco;
@@ -463,29 +464,35 @@ ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
         return -1;
     }
 
+    // Marca o inicio da espera
     inicio = timestamp_ms();
 
     while (1)
     {
+        // Atualiza o tempo ja gasto nesta espera
         agora = timestamp_ms();
         decorrido = agora - inicio;
 
+        // Encerra quando o limite total foi atingido
         if (decorrido >= timeout_ms)
         {
             return REDE_TIMEOUT;
         }
 
+        // Calcula quanto tempo ainda pode bloquear
         restante = timeout_ms - decorrido;
 
-        /*
+        /* APAGAR
          * Define o timeout do recvfrom para o tempo restante.
          * Mesmo assim mantemos nosso próprio relógio, como sugerido
-         * na fonte da disciplina.
+         * na fonte do Todt
          */
+        // Define o timeout do recvfrom para o tempo restante
         struct timeval timeout;
         timeout.tv_sec = (time_t)(restante / 1000);
         timeout.tv_usec = (suseconds_t)((restante % 1000) * 1000);
 
+        // Aplica o timeout no socket antes da leitura
         if (setsockopt(
                 soquete,
                 SOL_SOCKET,
@@ -497,9 +504,11 @@ ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
             return -1;
         }
 
+        // Limpa o endereco antes de receber o proximo quadro
         memset(&endereco_origem, 0, sizeof(endereco_origem));
         tamanho_endereco = sizeof(endereco_origem);
 
+        // Recebe um quadro Ethernet bruto
         ssize_t recebido = recvfrom(
             soquete,
             quadro,
@@ -508,6 +517,7 @@ ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
             (struct sockaddr *)&endereco_origem,
             &tamanho_endereco);
 
+        // Trata timeout, interrupcao e erro de rede
         if (recebido < 0)
         {
             if (errno == EINTR)
@@ -523,63 +533,72 @@ ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
             return -1;
         }
 
+        // Leituras vazias sao ignoradas
         if (recebido == 0)
         {
             continue;
         }
 
-        /*
-         * Ignora cópias locais do próprio pacote enviado.
-         */
+        // Ignora cópias locais do próprio pacote enviado
         if (endereco_origem.sll_pkttype == PACKET_OUTGOING)
         {
             continue;
         }
 
+        // Um quadro menor que o cabecalho Ethernet eh invalido
         if ((size_t)recebido < sizeof(struct ether_header))
         {
             continue;
         }
 
+        // Interpreta os primeiros bytes como cabecalho Ethernet
         struct ether_header *eth = (struct ether_header *)quadro;
 
         /*
-         * Descarta pacotes que não são do protocolo PacMan.
+         * Descarta pacotes que não são do protocolo PacMan
          */
         if (ntohs(eth->ether_type) != ETH_P_PACMAN)
         {
             continue;
         }
 
+        // Payload comeca logo depois do cabecalho Ethernet
         unsigned char *payload = quadro + sizeof(struct ether_header);
         size_t tamanho_payload = (size_t)recebido - sizeof(struct ether_header);
 
+        // Pacote PacMan minimo precisa ter cabecalho e CRC
         if (tamanho_payload < TAMANHO_CABECALHO_PROTOCOLO + TAMANHO_CRC_PROTOCOLO)
         {
             continue;
         }
 
+        // Primeiro byte deve ser o marcador do protocolo
         if (payload[0] != MARCADOR_INICIO)
         {
             continue;
         }
 
+        // Extrai o tamanho de dados codificado no cabecalho
         uint8_t tamanho_dados = (payload[1] >> 3) & 0x1F;
         size_t tamanho_pacote = TAMANHO_CABECALHO_PROTOCOLO + tamanho_dados + TAMANHO_CRC_PROTOCOLO;
 
+        // Quadro veio incompleto
         if (tamanho_pacote > tamanho_payload)
         {
             continue;
         }
 
+        // O buffer de destino precisa caber o pacote real
         if (tamanho_pacote > tamanho_buffer)
         {
             errno = EMSGSIZE;
             return -1;
         }
 
+        // Copia apenas o pacote PacMan, sem padding Ethernet
         memcpy(buffer, payload, tamanho_pacote);
 
+        // Retorna o tamanho real do pacote PacMan
         return (ssize_t)tamanho_pacote;
     }
 }
