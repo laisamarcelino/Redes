@@ -17,6 +17,11 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <sys/time.h>
+
+/* ===================================================================
+                         FUNÇÕES AUXILIARES
+======================================================================*/
 
 /*
  * Define um EtherType próprio para o projeto
@@ -69,6 +74,36 @@ static int eh_ethernet(const char *nome_interface)
     }
     return 0;
 }
+
+// * Obtém o MAC da interface para preencher o endereço de origem do quadro.
+static int obtem_mac_interface(int soquete, const char *nome_interface, unsigned char mac[ETH_ALEN])
+{
+    struct ifreq ifr;
+    memset(&ifr, 0, sizeof(ifr));
+
+    strncpy(ifr.ifr_name, nome_interface, IFNAMSIZ - 1);
+    if (ioctl(soquete, SIOCGIFHWADDR, &ifr) == -1)
+    {
+        perror("ioctl(SIOCGIFHWADDR)");
+        return -1;
+    }
+
+    memcpy(mac, ifr.ifr_hwaddr.sa_data, ETH_ALEN);
+    return 0;
+}
+
+static long long timestamp_ms(void)
+{
+    struct timeval tp;
+
+    gettimeofday(&tp, NULL);
+
+    return ((long long)tp.tv_sec * 1000LL) + ((long long)tp.tv_usec / 1000LL);
+}
+
+/* ===================================================================
+                         FUNÇÕES PRINCIPAIS
+======================================================================*/
 
 // Seleciona a interface de rede Ethernet ou loopback.
 char *seleciona_interface_rede(int allow_loopback)
@@ -155,23 +190,6 @@ char *seleciona_interface_rede(int allow_loopback)
     // Retorna o nome da interface escolhida
     printf("Interface de rede selecionada: %s\n", interface_selecionada);
     return interface_selecionada;
-}
-
-// * Obtém o MAC da interface para preencher o endereço de origem do quadro.
-static int obtem_mac_interface(int soquete, const char *nome_interface, unsigned char mac[ETH_ALEN])
-{
-    struct ifreq ifr;
-    memset(&ifr, 0, sizeof(ifr));
-
-    strncpy(ifr.ifr_name, nome_interface, IFNAMSIZ - 1);
-    if (ioctl(soquete, SIOCGIFHWADDR, &ifr) == -1)
-    {
-        perror("ioctl(SIOCGIFHWADDR)");
-        return -1;
-    }
-
-    memcpy(mac, ifr.ifr_hwaddr.sa_data, ETH_ALEN);
-    return 0;
 }
 
 int cria_raw_socket(char *nome_interface_rede)
@@ -416,13 +434,6 @@ ssize_t envia_mensagem(int soquete, const unsigned char *buffer, size_t tamanho_
     return enviado - (ssize_t)sizeof(struct ether_header);
 }
 
-// Responde ao cliente com a mensagem "ok".
-ssize_t responde_cliente_ok(int soquete)
-{
-    const unsigned char resposta[] = "ok\n";
-    return envia_mensagem(soquete, resposta, sizeof(resposta) - 1);
-}
-
 int fecha_raw_socket(int soquete)
 {
     if (close(soquete) == -1)
@@ -432,4 +443,123 @@ int fecha_raw_socket(int soquete)
     }
 
     return 0;
+}
+
+ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
+                                size_t tamanho_buffer, int timeout_ms)
+{
+    unsigned char quadro[TAM_BUFFER_RAW];
+    struct sockaddr_ll endereco_origem;
+    socklen_t tamanho_endereco;
+
+    long long inicio;
+    long long agora;
+    long long decorrido;
+    long long restante;
+
+    if (buffer == NULL || tamanho_buffer == 0 || timeout_ms <= 0)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    inicio = timestamp_ms();
+
+    while (1)
+    {
+        agora = timestamp_ms();
+        decorrido = agora - inicio;
+
+        if (decorrido >= timeout_ms)
+        {
+            return REDE_TIMEOUT;
+        }
+
+        restante = timeout_ms - decorrido;
+
+        /*
+         * Define o timeout do recvfrom para o tempo restante.
+         * Mesmo assim mantemos nosso próprio relógio, como sugerido
+         * na fonte da disciplina.
+         */
+        struct timeval timeout;
+        timeout.tv_sec = (time_t)(restante / 1000);
+        timeout.tv_usec = (suseconds_t)((restante % 1000) * 1000);
+
+        if (setsockopt(
+                soquete,
+                SOL_SOCKET,
+                SO_RCVTIMEO,
+                &timeout,
+                sizeof(timeout)) == -1)
+        {
+            perror("setsockopt(SO_RCVTIMEO)");
+            return -1;
+        }
+
+        memset(&endereco_origem, 0, sizeof(endereco_origem));
+        tamanho_endereco = sizeof(endereco_origem);
+
+        ssize_t recebido = recvfrom(
+            soquete,
+            quadro,
+            sizeof(quadro),
+            0,
+            (struct sockaddr *)&endereco_origem,
+            &tamanho_endereco);
+
+        if (recebido < 0)
+        {
+            if (errno == EINTR)
+            {
+                continue;
+            }
+
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+            {
+                return REDE_TIMEOUT;
+            }
+
+            return -1;
+        }
+
+        if (recebido == 0)
+        {
+            continue;
+        }
+
+        /*
+         * Ignora cópias locais do próprio pacote enviado.
+         */
+        if (endereco_origem.sll_pkttype == PACKET_OUTGOING)
+        {
+            continue;
+        }
+
+        if ((size_t)recebido < sizeof(struct ether_header))
+        {
+            continue;
+        }
+
+        struct ether_header *eth = (struct ether_header *)quadro;
+
+        /*
+         * Descarta pacotes que não são do protocolo PacMan.
+         */
+        if (ntohs(eth->ether_type) != ETH_P_PACMAN)
+        {
+            continue;
+        }
+
+        size_t tamanho_payload = (size_t)recebido - sizeof(struct ether_header);
+
+        if (tamanho_payload > tamanho_buffer)
+        {
+            tamanho_payload = tamanho_buffer;
+        }
+
+        memcpy(buffer, quadro + sizeof(struct ether_header), tamanho_payload);
+
+        return (ssize_t)tamanho_payload;
+    }
 }
