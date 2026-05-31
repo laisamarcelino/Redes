@@ -75,13 +75,18 @@ static int envia_mensagem_protocolada(int soquete, const char *texto)
         return -1;
     }
 
-    /* APAGAR: TESTE TEMPORARIO: corrompe um byte depois do CRC calculado */
-    pacote[3] ^= 0x01;
-
-
     // Tenta enviar ate receber ACK ou esgotar as tentativas
     for (tentativa = 1; tentativa <= MAX_TENTATIVAS_ENVIO; tentativa++)
     {
+        /*
+         * TESTE TEMPORARIO:
+         * corrompe somente a primeira tentativa.
+         */
+        if (tentativa == 1)
+        {
+            printf("[DEBUG] TESTE: corrompendo pacote somente na tentativa 1\n");
+            pacote[3] ^= 0x01;
+        }
         printf("[DEBUG] Enviando pacote seq=%u, tentativa %d/%d\n",
                mensagem.num_sequencia_msg,
                tentativa,
