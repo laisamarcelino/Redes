@@ -63,25 +63,33 @@ static void extrai_campos_pacote(
 
 static uint8_t calcula_crc8(const uint8_t *dados, size_t tamanho)
 {
+    // CRC inicia zerado antes de processar os bytes
     uint8_t crc = 0x00;
 
+    // Percorre todos os bytes usados no calculo
     for (size_t i = 0; i < tamanho; i++)
     {
+        // Mistura o byte atual no acumulador do CRC
+        // ^ eh xor
         crc ^= dados[i];
 
+        // Processa os 8 bits do byte atual
         for (int bit = 0; bit < 8; bit++)
         {
+            // Se o bit mais significativo esta ligado, aplica o polinomio
             if (crc & 0x80)
             {
                 crc = (uint8_t)((crc << 1) ^ 0x07);
             }
             else
             {
+                // Sem estouro, apenas desloca para o proximo bit
                 crc = (uint8_t)(crc << 1);
             }
         }
     }
 
+    // Retorna o CRC-8 calculado
     return crc;
 }
 
@@ -301,9 +309,8 @@ int valida_pacote(const uint8_t *pacote, size_t tamanho_pacote)
                tamanho_esperado);
     }
 
-    /*
-     * O CRC recebido está no último byte lógico do pacote,
-     * não necessariamente no último byte recebido pelo raw socket.
+    /* O CRC recebido está no último byte lógico do pacote,
+     * não no último byte recebido pelo raw socket.
      */
     uint8_t crc_recebido = pacote[tamanho_esperado - 1];
 
@@ -367,6 +374,7 @@ int desmonta_pacote(const uint8_t *pacote, size_t tamanho_pacote,
     return SUCESSO;
 }
 
+// Usada apenas para debugs
 void imprime_pacote(const uint8_t *pacote, size_t tamanho_pacote)
 {
     if (pacote == NULL)

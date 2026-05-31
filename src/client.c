@@ -12,11 +12,13 @@
 #define TIMEOUT_ACK_MS 1000
 #define MAX_TENTATIVAS_ENVIO 5
 
-static int espera_ack_nack_com_timeout(int soquete, uint8_t sequencia_esperada);
 
 /* ===================================================================
                          FUNÇÕES AUXILIARES
 ======================================================================*/
+
+// Prototipo da espera por resposta de controle com timeout
+static int espera_ack_nack_com_timeout(int soquete, uint8_t sequencia_esperada);
 
 /* APAGAR
  *
@@ -27,18 +29,21 @@ static int espera_ack_nack_com_timeout(int soquete, uint8_t sequencia_esperada);
  * se NACK: reenvia
  * se timeout: reenvia
  */
+// Sequencia global usada pelo cliente no envio para-e-espera
 static uint8_t proxima_sequencia = 0;
 
 // Envia uma unica mensagem de tamanho maximo 31 bytes
 static int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem)
 {
+    // Buffer do pacote montado pelo protocolo
     uint8_t pacote[TAMANHO_MAX_PACOTE];
     size_t tamanho_pacote;
 
-    /*
+    /* APAGAR
      * A sequência é definida aqui.
      * Em caso de reenvio, a mesma sequência é mantida.
      */
+    // Define a sequência
     mensagem->num_sequencia_msg = proxima_sequencia;
 
     if (monta_pacote(mensagem, pacote, &tamanho_pacote) != 0)
@@ -47,14 +52,17 @@ static int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem)
         return -1;
     }
 
+    // Repete o envio ate confirmar ou estourar o limite
     for (int tentativa = 1; tentativa <= MAX_TENTATIVAS_ENVIO; tentativa++)
     {
+        // Copia usada nesta tentativa de envio
         uint8_t pacote_envio[TAMANHO_MAX_PACOTE];
 
-        /*
+        /* APAGAR
          * Enviamos uma cópia.
          * Isso ajuda nos testes de corrupção e evita alterar o pacote original.
          */
+        // Enviamos uma copia para evitar alterar o pacote original
         memcpy(pacote_envio, pacote, tamanho_pacote);
 
         printf("[DEBUG] Enviando pacote tipo=%u seq=%u tam=%u tentativa %d/%d\n",
@@ -64,11 +72,13 @@ static int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem)
                tentativa,
                MAX_TENTATIVAS_ENVIO);
 
+        // Envia o pacote pela camada de rede
         ssize_t enviado = envia_mensagem(
             soquete,
             pacote_envio,
             tamanho_pacote);
 
+        // Trata erros de envio e interrupcoes
         if (enviado < 0)
         {
             if (errno == EINTR)
@@ -81,6 +91,7 @@ static int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem)
             return -1;
         }
 
+        // Confere se o envio foi completo
         if ((size_t)enviado != tamanho_pacote)
         {
             fprintf(stderr,
@@ -90,10 +101,12 @@ static int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem)
             return -1;
         }
 
+        // Espera resposta referente a mesma sequencia
         int resposta = espera_ack_nack_com_timeout(
             soquete,
             mensagem->num_sequencia_msg);
 
+        // ACK libera o proximo numero de sequencia
         if (resposta == MSG_ACK)
         {
             printf("[DEBUG] ACK recebido para seq=%u\n",
@@ -105,6 +118,7 @@ static int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem)
             return 0;
         }
 
+        // NACK faz repetir a mesma sequencia
         if (resposta == MSG_NACK)
         {
             fprintf(stderr,
@@ -113,6 +127,7 @@ static int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem)
             continue;
         }
 
+        // Timeout tambem faz repetir a mesma sequencia
         if (resposta == REDE_TIMEOUT)
         {
             fprintf(stderr,
@@ -125,6 +140,7 @@ static int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem)
         return -1;
     }
 
+    // Todas as tentativas foram consumidas
     fprintf(stderr,
             "[ERRO] Número máximo de tentativas atingido para seq=%u\n",
             mensagem->num_sequencia_msg);
@@ -139,6 +155,7 @@ static int envia_buffer_protocolado(
     const uint8_t *buffer,
     size_t tamanho_buffer)
 {
+    // Offset indica o inicio do proximo bloco
     size_t offset = 0;
 
     if (buffer == NULL && tamanho_buffer > 0)
@@ -147,14 +164,18 @@ static int envia_buffer_protocolado(
         return -1;
     }
 
+    // Envia todos os blocos de dados
     while (offset < tamanho_buffer)
     {
+        // Mensagem temporaria para o bloco atual
         mensagem_t mensagem;
         size_t bytes_restantes = tamanho_buffer - offset;
         uint8_t tamanho_bloco;
 
+        // Limpa a mensagem antes de preencher
         memset(&mensagem, 0, sizeof(mensagem));
 
+        // Limita cada bloco ao tamanho maximo do protocolo
         if (bytes_restantes > TAMANHO_MAX_DADOS)
         {
             tamanho_bloco = TAMANHO_MAX_DADOS;
@@ -167,11 +188,13 @@ static int envia_buffer_protocolado(
         mensagem.tipo_msg = tipo_msg;
         mensagem.tamanho_dados = tamanho_bloco;
 
+        // Copia o trecho atual do buffer para a mensagem
         memcpy(
             mensagem.dados,
             buffer + offset,
             tamanho_bloco);
 
+        // Envia o bloco com reenvio em caso de falha temporaria
         if (envia_pacote_com_reenvio(soquete, &mensagem) != 0)
         {
             fprintf(stderr,
@@ -180,19 +203,21 @@ static int envia_buffer_protocolado(
             return -1;
         }
 
+        // Avanca para o proximo trecho do buffer
         offset += tamanho_bloco;
     }
 
-    /*
-     * Depois de enviar todos os blocos, envia um pacote especial
-     * informando que a transmissão terminou.
+    /* Depois de enviar todos os blocos, envia um pacote especial
+     * informando que a transmissão terminou
      */
     mensagem_t fim;
     memset(&fim, 0, sizeof(fim));
 
+    // Marca o pacote como fim de transmissao
     fim.tipo_msg = MSG_FIM_TRANSMISSAO;
     fim.tamanho_dados = 0;
 
+    // Envia o pacote final para o servidor imprimir a mensagem completa
     if (envia_pacote_com_reenvio(soquete, &fim) != 0)
     {
         fprintf(stderr, "[ERRO] Falha ao enviar MSG_FIM_TRANSMISSAO\n");
@@ -256,6 +281,7 @@ static int espera_ack_nack_com_timeout(int soquete, uint8_t sequencia_esperada)
             return -1;
         }
 
+        // Ignora resposta de outra sequencia
         if (resposta.num_sequencia_msg != sequencia_esperada)
         {
             fprintf(stderr,

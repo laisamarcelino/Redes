@@ -13,6 +13,7 @@
                          FUNÇÕES AUXILIARES
 ======================================================================*/
 
+// Função usada para debug
 static void imprime_mensagem_protocolada(const mensagem_t *mensagem)
 {
     if (mensagem == NULL)
@@ -46,6 +47,7 @@ static void imprime_mensagem_protocolada(const mensagem_t *mensagem)
     fflush(stdout);
 }
 
+// Envia uma resposta de controle ao cliente
 static int envia_ack_nack(int soquete, uint8_t tipo_resposta, uint8_t sequencia)
 {
     mensagem_t resposta;
@@ -64,7 +66,7 @@ static int envia_ack_nack(int soquete, uint8_t tipo_resposta, uint8_t sequencia)
 
     resposta.tipo_msg = tipo_resposta;
     resposta.num_sequencia_msg = sequencia;
-    resposta.tamanho_dados = 0;
+    resposta.tamanho_dados = 0; // ACK e NACK nao carregam dados
 
     // Monta o pacote com a mensagem (ack ou nack)
     if (monta_pacote(&resposta, pacote, &tamanho_pacote) != 0)
@@ -104,12 +106,10 @@ static int envia_ack_nack(int soquete, uint8_t tipo_resposta, uint8_t sequencia)
     return 0;
 }
 
-static int adiciona_dados_recebidos(
-    uint8_t **buffer,
-    size_t *tamanho_atual,
-    size_t *capacidade,
-    const uint8_t *dados,
-    size_t tamanho_dados)
+// Responsavel por remontar msgs fragmentadas (protocolo permite 31 bytes por msg)
+static int remonta_mensagem(uint8_t **buffer, size_t *tamanho_atual,
+                            size_t *capacidade, const uint8_t *dados,
+                            size_t tamanho_dados)
 {
     // Fragmento vazio nao altera a mensagem remontada
     if (tamanho_dados == 0)
@@ -120,6 +120,7 @@ static int adiciona_dados_recebidos(
     // Aumenta o buffer quando o fragmento nao cabe
     if (*tamanho_atual + tamanho_dados > *capacidade)
     {
+        // Aumenta a capacidade para 128 bytes
         size_t nova_capacidade = (*capacidade == 0) ? 128 : *capacidade;
 
         // Dobra a capacidade ate caber o novo tamanho
@@ -153,18 +154,19 @@ static int adiciona_dados_recebidos(
     return 0;
 }
 
+// Calcula a proxima sequencia respeitando o limite de 6 bits
 static uint8_t proxima_sequencia(uint8_t sequencia)
 {
-    // Calcula a proxima sequencia respeitando o limite de 6 bits
     return (uint8_t)((sequencia + 1) % (SEQUENCIA_MAX + 1));
 }
 
+// Calcula a sequencia anterior respeitando o limite de 6 bits
 static uint8_t sequencia_anterior(uint8_t sequencia)
 {
-    // Calcula a sequencia anterior respeitando o limite de 6 bits
     return (sequencia == 0) ? SEQUENCIA_MAX : (uint8_t)(sequencia - 1);
 }
 
+// Imprime o buffer completo remontado
 static void imprime_mensagem_completa(const uint8_t *buffer, size_t tamanho)
 {
     // Imprime a mensagem remontada com todos os fragmentos
@@ -184,6 +186,7 @@ static void imprime_mensagem_completa(const uint8_t *buffer, size_t tamanho)
                          FUNÇÕES PRINCIPAIS
 ======================================================================*/
 
+// Fica em loop infinito esperando pacotes
 int executa_servidor(int soquete)
 {
     // Buffer que recebe um pacote PacMan ja sem cabecalho Ethernet
@@ -228,9 +231,13 @@ int executa_servidor(int soquete)
             fprintf(stderr, "[ERRO] Pacote invalido recebido\n");
 
             /* APAGAR
-             * Se pelo menos o pacote tem cabeçalho suficiente e marcador correto,
-             * tenta extrair a sequência para enviar NACK.
+             *  Se o pacote falhou na validação, mas possui cabeçalho mínimo
+             * e marcador de início correto, ainda conseguimos extrair a sequência
+             * para enviar NACK.
+             *
+             * Isso cobre, por exemplo, pacotes com CRC inválido.
              */
+            // Se falhar, o servidor manda NACK, se conseguir extrair a sequência do cabeçalho
             if (recebido >= TAMANHO_CABECALHO_PROTOCOLO &&
                 pacote[0] == MARCADOR_INICIO)
             {
@@ -246,6 +253,10 @@ int executa_servidor(int soquete)
             continue;
         }
 
+        /* APAGAR
+         * Se o servidor já aceitou esse pacote antes ele nao reprocessa o pacote
+         * de novo, mas reenvia ACK. Isso evita duplicar os dados
+         */
         // Reenvio da ultima sequencia ja aceita recebe ACK sem duplicar dados
         if (mensagem.num_sequencia_msg == sequencia_anterior(sequencia_esperada))
         {
@@ -274,7 +285,7 @@ int executa_servidor(int soquete)
         // Fragmentos de dados sao acumulados ate o fim da transmissao
         if (mensagem.tipo_msg == MSG_DADOS)
         {
-            if (adiciona_dados_recebidos(
+            if (remonta_mensagem(
                     &buffer_recebido,
                     &tamanho_recebido,
                     &capacidade_recebido,
@@ -295,7 +306,7 @@ int executa_servidor(int soquete)
             continue;
         }
 
-        // Fim de transmissao dispara a impressao da mensagem remontada
+        // Trata o fim da transmissao
         if (mensagem.tipo_msg == MSG_FIM_TRANSMISSAO)
         {
             sequencia_esperada = proxima_sequencia(sequencia_esperada);
@@ -315,9 +326,10 @@ int executa_servidor(int soquete)
             continue;
         }
 
-        // Mostra no terminal mensagens que nao fazem parte de fragmentacao
+        // Mostra no terminal mensagens de debug
         imprime_mensagem_protocolada(&mensagem);
 
+        // Avança a sequencia
         sequencia_esperada = proxima_sequencia(sequencia_esperada);
 
         // Confirma o recebimento da msg
@@ -325,7 +337,5 @@ int executa_servidor(int soquete)
             soquete,
             MSG_ACK,
             mensagem.num_sequencia_msg);
-
-        // DEBUG Quando houver validacao de CRC, pacotes corrompidos devem receber NACK
     }
 }
