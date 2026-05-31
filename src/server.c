@@ -111,20 +111,24 @@ static int adiciona_dados_recebidos(
     const uint8_t *dados,
     size_t tamanho_dados)
 {
+    // Fragmento vazio nao altera a mensagem remontada
     if (tamanho_dados == 0)
     {
         return 0;
     }
 
+    // Aumenta o buffer quando o fragmento nao cabe
     if (*tamanho_atual + tamanho_dados > *capacidade)
     {
         size_t nova_capacidade = (*capacidade == 0) ? 128 : *capacidade;
 
+        // Dobra a capacidade ate caber o novo tamanho
         while (*tamanho_atual + tamanho_dados > nova_capacidade)
         {
             nova_capacidade *= 2;
         }
 
+        // Realoca preservando os dados ja recebidos
         uint8_t *novo_buffer = realloc(*buffer, nova_capacidade);
 
         if (novo_buffer == NULL)
@@ -137,14 +141,43 @@ static int adiciona_dados_recebidos(
         *capacidade = nova_capacidade;
     }
 
+    // Copia o fragmento no final da mensagem remontada
     memcpy(
         *buffer + *tamanho_atual,
         dados,
         tamanho_dados);
 
+    // Atualiza o tamanho total ja recebido
     *tamanho_atual += tamanho_dados;
 
     return 0;
+}
+
+static uint8_t proxima_sequencia(uint8_t sequencia)
+{
+    // Calcula a proxima sequencia respeitando o limite de 6 bits
+    return (uint8_t)((sequencia + 1) % (SEQUENCIA_MAX + 1));
+}
+
+static uint8_t sequencia_anterior(uint8_t sequencia)
+{
+    // Calcula a sequencia anterior respeitando o limite de 6 bits
+    return (sequencia == 0) ? SEQUENCIA_MAX : (uint8_t)(sequencia - 1);
+}
+
+static void imprime_mensagem_completa(const uint8_t *buffer, size_t tamanho)
+{
+    // Imprime a mensagem remontada com todos os fragmentos
+    printf("[DEBUG] Mensagem completa recebida com %zu bytes: ", tamanho);
+
+    // Escreve os bytes exatamente como chegaram quando houver conteudo
+    if (buffer != NULL && tamanho > 0)
+    {
+        fwrite(buffer, 1, tamanho, stdout);
+    }
+
+    printf("\n");
+    fflush(stdout);
 }
 
 /* ===================================================================
@@ -159,6 +192,7 @@ int executa_servidor(int soquete)
     uint8_t *buffer_recebido = NULL;
     size_t tamanho_recebido = 0;
     size_t capacidade_recebido = 0;
+    uint8_t sequencia_esperada = 0;
 
     printf("Servidor aguardando pacotes do protocolo PacMan...\n");
 
@@ -209,50 +243,82 @@ int executa_servidor(int soquete)
                     sequencia_erro);
             }
 
-            if (mensagem.tipo_msg == MSG_DADOS)
+            continue;
+        }
+
+        // Reenvio da ultima sequencia ja aceita recebe ACK sem duplicar dados
+        if (mensagem.num_sequencia_msg == sequencia_anterior(sequencia_esperada))
+        {
+            envia_ack_nack(
+                soquete,
+                MSG_ACK,
+                mensagem.num_sequencia_msg);
+            continue;
+        }
+
+        // Sequencia fora de ordem recebe NACK para pedir reenvio
+        if (mensagem.num_sequencia_msg != sequencia_esperada)
+        {
+            fprintf(stderr,
+                    "[ERRO] Sequencia inesperada. Recebido: %u, esperado: %u\n",
+                    mensagem.num_sequencia_msg,
+                    sequencia_esperada);
+
+            envia_ack_nack(
+                soquete,
+                MSG_NACK,
+                mensagem.num_sequencia_msg);
+            continue;
+        }
+
+        // Fragmentos de dados sao acumulados ate o fim da transmissao
+        if (mensagem.tipo_msg == MSG_DADOS)
+        {
+            if (adiciona_dados_recebidos(
+                    &buffer_recebido,
+                    &tamanho_recebido,
+                    &capacidade_recebido,
+                    mensagem.dados,
+                    mensagem.tamanho_dados) != 0)
             {
-                if (adiciona_dados_recebidos(
-                        &buffer_recebido,
-                        &tamanho_recebido,
-                        &capacidade_recebido,
-                        mensagem.dados,
-                        mensagem.tamanho_dados) != 0)
-                {
-                    return -1;
-                }
-
-                envia_ack_nack(
-                    soquete,
-                    MSG_ACK,
-                    mensagem.num_sequencia_msg);
-
-                continue;
-            }
-
-            if (mensagem.tipo_msg == MSG_FIM_TRANSMISSAO)
-            {
-                envia_ack_nack(
-                    soquete,
-                    MSG_ACK,
-                    mensagem.num_sequencia_msg);
-
-                printf("[DEBUG] Mensagem completa recebida com %zu bytes: ", tamanho_recebido);
-                fwrite(buffer_recebido, 1, tamanho_recebido, stdout);
-                printf("\n");
-
                 free(buffer_recebido);
-                buffer_recebido = NULL;
-                tamanho_recebido = 0;
-                capacidade_recebido = 0;
-
-                continue;
+                return -1;
             }
+
+            sequencia_esperada = proxima_sequencia(sequencia_esperada);
+
+            envia_ack_nack(
+                soquete,
+                MSG_ACK,
+                mensagem.num_sequencia_msg);
 
             continue;
         }
 
-        // Mostra no terminal a mensagem recebida
+        // Fim de transmissao dispara a impressao da mensagem remontada
+        if (mensagem.tipo_msg == MSG_FIM_TRANSMISSAO)
+        {
+            sequencia_esperada = proxima_sequencia(sequencia_esperada);
+
+            envia_ack_nack(
+                soquete,
+                MSG_ACK,
+                mensagem.num_sequencia_msg);
+
+            imprime_mensagem_completa(buffer_recebido, tamanho_recebido);
+
+            free(buffer_recebido);
+            buffer_recebido = NULL;
+            tamanho_recebido = 0;
+            capacidade_recebido = 0;
+
+            continue;
+        }
+
+        // Mostra no terminal mensagens que nao fazem parte de fragmentacao
         imprime_mensagem_protocolada(&mensagem);
+
+        sequencia_esperada = proxima_sequencia(sequencia_esperada);
 
         // Confirma o recebimento da msg
         envia_ack_nack(
