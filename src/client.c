@@ -78,22 +78,24 @@ static int envia_mensagem_protocolada(int soquete, const char *texto)
     // Tenta enviar ate receber ACK ou esgotar as tentativas
     for (tentativa = 1; tentativa <= MAX_TENTATIVAS_ENVIO; tentativa++)
     {
-        /*
-         * TESTE TEMPORARIO:
-         * corrompe somente a primeira tentativa.
-         */
+        uint8_t pacote_envio[TAMANHO_MAX_PACOTE];
+
+        memcpy(pacote_envio, pacote, tamanho_pacote);
+
+        // TESTE TEMPORARIO: corrompe somente a primeira tentativa; apagar depois
         if (tentativa == 1)
         {
             printf("[DEBUG] TESTE: corrompendo pacote somente na tentativa 1\n");
-            pacote[3] ^= 0x01;
+            pacote_envio[3] ^= 0x01;
         }
+
         printf("[DEBUG] Enviando pacote seq=%u, tentativa %d/%d\n",
                mensagem.num_sequencia_msg,
                tentativa,
                MAX_TENTATIVAS_ENVIO);
 
         // Envia somente os bytes reais do pacote
-        ssize_t enviado = envia_mensagem(soquete, pacote, tamanho_pacote);
+        ssize_t enviado = envia_mensagem(soquete, pacote_envio, tamanho_pacote);
 
         // Reaproveita a mesma tentativa se o envio foi interrompido
         if (enviado < 0)
