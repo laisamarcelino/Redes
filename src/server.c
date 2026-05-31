@@ -146,6 +146,23 @@ int executa_servidor(int soquete)
         if (desmonta_pacote(pacote, (size_t)recebido, &mensagem) != 0)
         {
             fprintf(stderr, "[ERRO] Pacote invalido recebido\n");
+
+            /* APAGAR
+             * Se pelo menos o pacote tem cabeçalho suficiente e marcador correto,
+             * tenta extrair a sequência para enviar NACK.
+             */
+            if (recebido >= TAMANHO_CABECALHO_PROTOCOLO &&
+                pacote[0] == MARCADOR_INICIO)
+            {
+                uint8_t sequencia_erro = (uint8_t)(((pacote[1] & 0x07) << 3) |
+                                                   ((pacote[2] >> 5) & 0x07));
+
+                envia_resposta_controle(
+                    soquete,
+                    MSG_NACK,
+                    sequencia_erro);
+            }
+
             continue;
         }
 
