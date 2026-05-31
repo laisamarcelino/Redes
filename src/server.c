@@ -104,6 +104,49 @@ static int envia_ack_nack(int soquete, uint8_t tipo_resposta, uint8_t sequencia)
     return 0;
 }
 
+static int adiciona_dados_recebidos(
+    uint8_t **buffer,
+    size_t *tamanho_atual,
+    size_t *capacidade,
+    const uint8_t *dados,
+    size_t tamanho_dados)
+{
+    if (tamanho_dados == 0)
+    {
+        return 0;
+    }
+
+    if (*tamanho_atual + tamanho_dados > *capacidade)
+    {
+        size_t nova_capacidade = (*capacidade == 0) ? 128 : *capacidade;
+
+        while (*tamanho_atual + tamanho_dados > nova_capacidade)
+        {
+            nova_capacidade *= 2;
+        }
+
+        uint8_t *novo_buffer = realloc(*buffer, nova_capacidade);
+
+        if (novo_buffer == NULL)
+        {
+            fprintf(stderr, "[ERRO] Falha ao realocar buffer de recebimento\n");
+            return -1;
+        }
+
+        *buffer = novo_buffer;
+        *capacidade = nova_capacidade;
+    }
+
+    memcpy(
+        *buffer + *tamanho_atual,
+        dados,
+        tamanho_dados);
+
+    *tamanho_atual += tamanho_dados;
+
+    return 0;
+}
+
 /* ===================================================================
                          FUNÇÕES PRINCIPAIS
 ======================================================================*/
@@ -113,6 +156,9 @@ int executa_servidor(int soquete)
     // Buffer que recebe um pacote PacMan ja sem cabecalho Ethernet
     uint8_t pacote[TAMANHO_MAX_PACOTE];
     mensagem_t mensagem;
+    uint8_t *buffer_recebido = NULL;
+    size_t tamanho_recebido = 0;
+    size_t capacidade_recebido = 0;
 
     printf("Servidor aguardando pacotes do protocolo PacMan...\n");
 
@@ -161,6 +207,45 @@ int executa_servidor(int soquete)
                     soquete,
                     MSG_NACK,
                     sequencia_erro);
+            }
+
+            if (mensagem.tipo_msg == MSG_DADOS)
+            {
+                if (adiciona_dados_recebidos(
+                        &buffer_recebido,
+                        &tamanho_recebido,
+                        &capacidade_recebido,
+                        mensagem.dados,
+                        mensagem.tamanho_dados) != 0)
+                {
+                    return -1;
+                }
+
+                envia_ack_nack(
+                    soquete,
+                    MSG_ACK,
+                    mensagem.num_sequencia_msg);
+
+                continue;
+            }
+
+            if (mensagem.tipo_msg == MSG_FIM_TRANSMISSAO)
+            {
+                envia_ack_nack(
+                    soquete,
+                    MSG_ACK,
+                    mensagem.num_sequencia_msg);
+
+                printf("[DEBUG] Mensagem completa recebida com %zu bytes: ", tamanho_recebido);
+                fwrite(buffer_recebido, 1, tamanho_recebido, stdout);
+                printf("\n");
+
+                free(buffer_recebido);
+                buffer_recebido = NULL;
+                tamanho_recebido = 0;
+                capacidade_recebido = 0;
+
+                continue;
             }
 
             continue;
