@@ -19,14 +19,14 @@ static int espera_ack_nack_com_timeout(int soquete, uint8_t sequencia_esperada);
 ======================================================================*/
 
 /* APAGAR
- * 
+ *
  * Fluxo para-e-espera
  * envia pacote
  * espera ACK/NACK
  * se ACK: confirma
  * se NACK: reenvia
  * se timeout: reenvia
-*/
+ */
 static int envia_mensagem_protocolada(int soquete, const char *texto)
 {
     // Mantem a proxima sequencia entre chamadas da funcao
@@ -75,6 +75,10 @@ static int envia_mensagem_protocolada(int soquete, const char *texto)
         return -1;
     }
 
+    /* TESTE TEMPORARIO: corrompe um byte depois do CRC calculado */
+    pacote[3] ^= 0x01;
+
+    
     // Tenta enviar ate receber ACK ou esgotar as tentativas
     for (tentativa = 1; tentativa <= MAX_TENTATIVAS_ENVIO; tentativa++)
     {
