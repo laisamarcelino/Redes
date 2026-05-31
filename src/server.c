@@ -157,7 +157,7 @@ int executa_servidor(int soquete)
                 uint8_t sequencia_erro = (uint8_t)(((pacote[1] & 0x07) << 3) |
                                                    ((pacote[2] >> 5) & 0x07));
 
-                envia_resposta_controle(
+                envia_ack_nack(
                     soquete,
                     MSG_NACK,
                     sequencia_erro);
