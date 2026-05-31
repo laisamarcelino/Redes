@@ -61,6 +61,30 @@ static void extrai_campos_pacote(
     *tipo_msg = pacote[2] & 0x1F;
 }
 
+static uint8_t calcula_crc8(const uint8_t *dados, size_t tamanho)
+{
+    uint8_t crc = 0x00;
+
+    for (size_t i = 0; i < tamanho; i++)
+    {
+        crc ^= dados[i];
+
+        for (int bit = 0; bit < 8; bit++)
+        {
+            if (crc & 0x80)
+            {
+                crc = (uint8_t)((crc << 1) ^ 0x07);
+            }
+            else
+            {
+                crc = (uint8_t)(crc << 1);
+            }
+        }
+    }
+
+    return crc;
+}
+
 /* ===================================================================
                          FUNÇÕES PRINCIPAIS
 ======================================================================*/
@@ -159,9 +183,18 @@ int monta_pacote(const mensagem_t *mensagem, uint8_t pacote[TAMANHO_MAX_PACOTE],
             mensagem->tamanho_dados);
     }
 
-    // DEBUG - Implementar CRC
+    /* APAGAR
+     * CRC fica no último byte lógico do pacote.
+     *
+     * Calculamos sobre:
+     *   cabeçalho + dados
+     *
+     * Não calculamos sobre o próprio CRC.
+     */
     // CRC estará no ultimo byte do pacote
-    pacote[tamanho_total - 1] = CRC_TEMPORARIO;
+    pacote[tamanho_total - 1] = calcula_crc8(
+        pacote,
+        TAMANHO_CABECALHO_PROTOCOLO + mensagem->tamanho_dados);
 
     *tamanho_pacote = tamanho_total;
 
@@ -252,20 +285,40 @@ int valida_pacote(const uint8_t *pacote, size_t tamanho_pacote)
     // Confere se o tamanho recebido bate com o tamanho informado no cabecalho
     tamanho_esperado = TAMANHO_CABECALHO_PROTOCOLO + tamanho_dados + TAMANHO_CRC_PROTOCOLO;
 
-    if (tamanho_pacote != tamanho_esperado)
+    if (tamanho_pacote < tamanho_esperado)
     {
         fprintf(stderr,
-                "[ERRO] Tamanho do pacote inconsistente. Recebido: %zu, esperado: %zu\n",
+                "[ERRO] Pacote incompleto. Recebido: %zu, esperado no minimo: %zu\n",
                 tamanho_pacote,
                 tamanho_esperado);
         return ERRO;
     }
 
-    /* DEBUG
-     * CRC ainda nao esta implementado.
-     * Por enquanto, apenas garantimos que o byte reservado existe,
-     * pois ele ja foi considerado no tamanho_esperado.
+    if (tamanho_pacote > tamanho_esperado)
+    {
+        printf("[DEBUG] Pacote com padding. Recebido: %zu, tamanho logico: %zu\n",
+               tamanho_pacote,
+               tamanho_esperado);
+    }
+
+    /*
+     * O CRC recebido está no último byte lógico do pacote,
+     * não necessariamente no último byte recebido pelo raw socket.
      */
+    uint8_t crc_recebido = pacote[tamanho_esperado - 1];
+
+    uint8_t crc_calculado = calcula_crc8(
+        pacote,
+        TAMANHO_CABECALHO_PROTOCOLO + tamanho_dados);
+
+    if (crc_recebido != crc_calculado)
+    {
+        fprintf(stderr,
+                "[ERRO] CRC invalido. Recebido: 0x%02X, calculado: 0x%02X\n",
+                crc_recebido,
+                crc_calculado);
+        return ERRO;
+    }
 
     return SUCESSO;
 }
