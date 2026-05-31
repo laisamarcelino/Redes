@@ -1,7 +1,8 @@
 #define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
-#include "../include/network.h"
+#include "network.h"
+#include "protocol.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -16,15 +17,20 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <sys/time.h>
+
+/* ===================================================================
+                         FUNÇÕES AUXILIARES
+======================================================================*/
 
 /*
- * * Correção: define um EtherType próprio para o projeto.
- * Com isso o servidor deixa de processar ARP, IPv6 e outros pacotes da rede.
+ * Define um EtherType próprio para o projeto
+ * Com isso o servidor deixa de processar ARP, IPv6 e outros pacotes da rede
  */
 #define ETH_P_PACMAN 0x88B5
 
 /*
- * * Guarda dados da interface configurada.
+ * Guarda dados da interface configurada.
  * envia_mensagem() usa essas informações para montar o quadro Ethernet.
  */
 static int g_ifindex = 0;
@@ -68,6 +74,36 @@ static int eh_ethernet(const char *nome_interface)
     }
     return 0;
 }
+
+// * Obtém o MAC da interface para preencher o endereço de origem do quadro.
+static int obtem_mac_interface(int soquete, const char *nome_interface, unsigned char mac[ETH_ALEN])
+{
+    struct ifreq ifr;
+    memset(&ifr, 0, sizeof(ifr));
+
+    strncpy(ifr.ifr_name, nome_interface, IFNAMSIZ - 1);
+    if (ioctl(soquete, SIOCGIFHWADDR, &ifr) == -1)
+    {
+        perror("ioctl(SIOCGIFHWADDR)");
+        return -1;
+    }
+
+    memcpy(mac, ifr.ifr_hwaddr.sa_data, ETH_ALEN);
+    return 0;
+}
+
+static long long timestamp_ms(void)
+{
+    struct timeval tp;
+
+    gettimeofday(&tp, NULL);
+
+    return ((long long)tp.tv_sec * 1000LL) + ((long long)tp.tv_usec / 1000LL);
+}
+
+/* ===================================================================
+                         FUNÇÕES PRINCIPAIS
+======================================================================*/
 
 // Seleciona a interface de rede Ethernet ou loopback.
 char *seleciona_interface_rede(int allow_loopback)
@@ -156,23 +192,6 @@ char *seleciona_interface_rede(int allow_loopback)
     return interface_selecionada;
 }
 
-// * Obtém o MAC da interface para preencher o endereço de origem do quadro.
-static int obtem_mac_interface(int soquete, const char *nome_interface, unsigned char mac[ETH_ALEN])
-{
-    struct ifreq ifr;
-    memset(&ifr, 0, sizeof(ifr));
-
-    strncpy(ifr.ifr_name, nome_interface, IFNAMSIZ - 1);
-    if (ioctl(soquete, SIOCGIFHWADDR, &ifr) == -1)
-    {
-        perror("ioctl(SIOCGIFHWADDR)");
-        return -1;
-    }
-
-    memcpy(mac, ifr.ifr_hwaddr.sa_data, ETH_ALEN);
-    return 0;
-}
-
 int cria_raw_socket(char *nome_interface_rede)
 {
     if (nome_interface_rede == NULL)
@@ -182,7 +201,8 @@ int cria_raw_socket(char *nome_interface_rede)
     }
 
     /*
-     * * Correção: usa SOCK_RAW e monta o cabeçalho Ethernet completo.
+     * APAGAR
+     * Usa SOCK_RAW e monta o cabeçalho Ethernet completo.
      * O envio deixa de depender de payload solto via send().
      */
     int soquete = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_PACMAN));
@@ -224,7 +244,7 @@ int cria_raw_socket(char *nome_interface_rede)
         return -1;
     }
 
-    // * Mantém modo promíscuo para facilitar testes e capturas em laboratório.
+    // Mantém modo promíscuo para facilitar testes e capturas em laboratório.
     struct packet_mreq mr;
     memset(&mr, 0, sizeof(mr));
     mr.mr_ifindex = ifindex;
@@ -244,7 +264,7 @@ int cria_raw_socket(char *nome_interface_rede)
     return soquete;
 }
 
-// * Espera um quadro do protocolo PacMan e entrega apenas o payload.
+// Espera um quadro do protocolo PacMan e entrega apenas o payload.
 ssize_t espera_mensagem_servidor(int soquete, unsigned char *buffer, size_t tamanho_buffer)
 {
     unsigned char quadro[TAM_BUFFER_RAW];
@@ -268,7 +288,7 @@ ssize_t espera_mensagem_servidor(int soquete, unsigned char *buffer, size_t tama
             return recebido;
         }
 
-        // * Ignora cópias locais do próprio pacote enviado.
+        // Ignora cópias locais do próprio pacote enviado.
         if (endereco_origem.sll_pkttype == PACKET_OUTGOING)
         {
             continue;
@@ -281,24 +301,45 @@ ssize_t espera_mensagem_servidor(int soquete, unsigned char *buffer, size_t tama
 
         struct ether_header *eth = (struct ether_header *)quadro;
 
-        // * Descarta tudo que não tenha o EtherType do projeto.
+        // Descarta tudo que não tenha o EtherType do projeto.
         if (ntohs(eth->ether_type) != ETH_P_PACMAN)
         {
             continue;
         }
 
+        unsigned char *payload = quadro + sizeof(struct ether_header);
         size_t tamanho_payload = (size_t)recebido - sizeof(struct ether_header);
-        if (tamanho_payload > tamanho_buffer)
+
+        if (tamanho_payload < TAMANHO_CABECALHO_PROTOCOLO + TAMANHO_CRC_PROTOCOLO)
         {
-            tamanho_payload = tamanho_buffer;
+            continue;
         }
 
-        memcpy(buffer, quadro + sizeof(struct ether_header), tamanho_payload);
-        return (ssize_t)tamanho_payload;
+        if (payload[0] != MARCADOR_INICIO)
+        {
+            continue;
+        }
+
+        uint8_t tamanho_dados = (payload[1] >> 3) & 0x1F;
+        size_t tamanho_pacote = TAMANHO_CABECALHO_PROTOCOLO + tamanho_dados + TAMANHO_CRC_PROTOCOLO;
+
+        if (tamanho_pacote > tamanho_payload)
+        {
+            continue;
+        }
+
+        if (tamanho_pacote > tamanho_buffer)
+        {
+            errno = EMSGSIZE;
+            return -1;
+        }
+
+        memcpy(buffer, payload, tamanho_pacote);
+        return (ssize_t)tamanho_pacote;
     }
 }
 
-// * Envia uma mensagem montando um quadro Ethernet completo.
+// Envia uma mensagem montando um quadro Ethernet completo.
 ssize_t envia_mensagem(int soquete, const unsigned char *buffer, size_t tamanho_buffer)
 {
     // Nao ha o que enviar se o ponteiro for nulo ou o payload estiver vazio.
@@ -337,7 +378,7 @@ ssize_t envia_mensagem(int soquete, const unsigned char *buffer, size_t tamanho_
     struct ether_header *eth = (struct ether_header *)quadro;
 
     /*
-     * * CORRECAO: usa broadcast como MAC destino no primeiro teste por cabo.
+     * Usa broadcast como MAC destino no primeiro teste por cabo.
      * Assim não é necessário descobrir o MAC da outra máquina nesta etapa.
      * ff:ff:ff:ff:ff:ff faz a placa enviar o quadro para todos no enlace local.
      */
@@ -393,13 +434,6 @@ ssize_t envia_mensagem(int soquete, const unsigned char *buffer, size_t tamanho_
     return enviado - (ssize_t)sizeof(struct ether_header);
 }
 
-// Responde ao cliente com a mensagem "ok".
-ssize_t responde_cliente_ok(int soquete)
-{
-    const unsigned char resposta[] = "ok\n";
-    return envia_mensagem(soquete, resposta, sizeof(resposta) - 1);
-}
-
 int fecha_raw_socket(int soquete)
 {
     if (close(soquete) == -1)
@@ -409,4 +443,162 @@ int fecha_raw_socket(int soquete)
     }
 
     return 0;
+}
+
+ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
+                                size_t tamanho_buffer, int timeout_ms)
+{
+    // Buffer temporario para o quadro Ethernet completo.
+    unsigned char quadro[TAM_BUFFER_RAW];
+    struct sockaddr_ll endereco_origem;
+    socklen_t tamanho_endereco;
+
+    long long inicio;
+    long long agora;
+    long long decorrido;
+    long long restante;
+
+    if (buffer == NULL || tamanho_buffer == 0 || timeout_ms <= 0)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    // Marca o inicio da espera
+    inicio = timestamp_ms();
+
+    while (1)
+    {
+        // Atualiza o tempo ja gasto nesta espera
+        agora = timestamp_ms();
+        decorrido = agora - inicio;
+
+        // Encerra quando o limite total foi atingido
+        if (decorrido >= timeout_ms)
+        {
+            return REDE_TIMEOUT;
+        }
+
+        // Calcula quanto tempo ainda pode bloquear
+        restante = timeout_ms - decorrido;
+
+        /* APAGAR
+         * Define o timeout do recvfrom para o tempo restante.
+         * Mesmo assim mantemos nosso próprio relógio, como sugerido
+         * na fonte do Todt
+         */
+        // Define o timeout do recvfrom para o tempo restante
+        struct timeval timeout;
+        timeout.tv_sec = (time_t)(restante / 1000);
+        timeout.tv_usec = (suseconds_t)((restante % 1000) * 1000);
+
+        // Aplica o timeout no socket antes da leitura
+        if (setsockopt(
+                soquete,
+                SOL_SOCKET,
+                SO_RCVTIMEO,
+                &timeout,
+                sizeof(timeout)) == -1)
+        {
+            perror("setsockopt(SO_RCVTIMEO)");
+            return -1;
+        }
+
+        // Limpa o endereco antes de receber o proximo quadro
+        memset(&endereco_origem, 0, sizeof(endereco_origem));
+        tamanho_endereco = sizeof(endereco_origem);
+
+        // Recebe um quadro Ethernet bruto
+        ssize_t recebido = recvfrom(
+            soquete,
+            quadro,
+            sizeof(quadro),
+            0,
+            (struct sockaddr *)&endereco_origem,
+            &tamanho_endereco);
+
+        // Trata timeout, interrupcao e erro de rede
+        if (recebido < 0)
+        {
+            if (errno == EINTR)
+            {
+                continue;
+            }
+
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+            {
+                return REDE_TIMEOUT;
+            }
+
+            return -1;
+        }
+
+        // Leituras vazias sao ignoradas
+        if (recebido == 0)
+        {
+            continue;
+        }
+
+        // Ignora cópias locais do próprio pacote enviado
+        if (endereco_origem.sll_pkttype == PACKET_OUTGOING)
+        {
+            continue;
+        }
+
+        // Um quadro menor que o cabecalho Ethernet eh invalido
+        if ((size_t)recebido < sizeof(struct ether_header))
+        {
+            continue;
+        }
+
+        // Interpreta os primeiros bytes como cabecalho Ethernet
+        struct ether_header *eth = (struct ether_header *)quadro;
+
+        /*
+         * Descarta pacotes que não são do protocolo PacMan
+         */
+        if (ntohs(eth->ether_type) != ETH_P_PACMAN)
+        {
+            continue;
+        }
+
+        // Payload comeca logo depois do cabecalho Ethernet
+        unsigned char *payload = quadro + sizeof(struct ether_header);
+        size_t tamanho_payload = (size_t)recebido - sizeof(struct ether_header);
+
+        // Pacote PacMan minimo precisa ter cabecalho e CRC
+        if (tamanho_payload < TAMANHO_CABECALHO_PROTOCOLO + TAMANHO_CRC_PROTOCOLO)
+        {
+            continue;
+        }
+
+        // Primeiro byte deve ser o marcador do protocolo
+        if (payload[0] != MARCADOR_INICIO)
+        {
+            continue;
+        }
+
+        // Extrai o tamanho de dados codificado no cabecalho
+        uint8_t tamanho_dados = (payload[1] >> 3) & 0x1F;
+        size_t tamanho_pacote = TAMANHO_CABECALHO_PROTOCOLO + tamanho_dados + TAMANHO_CRC_PROTOCOLO;
+
+        // Quadro veio incompleto
+        if (tamanho_pacote > tamanho_payload)
+        {
+            continue;
+        }
+
+        // O buffer de destino precisa caber o pacote real
+        if (tamanho_pacote > tamanho_buffer)
+        {
+            errno = EMSGSIZE;
+            return -1;
+        }
+
+        // Copia apenas o pacote PacMan, sem padding Ethernet
+        memcpy(buffer, payload, tamanho_pacote);
+
+        // Retorna o tamanho real do pacote PacMan
+        return (ssize_t)tamanho_pacote;
+    }
 }

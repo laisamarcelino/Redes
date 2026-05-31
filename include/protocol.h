@@ -8,14 +8,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MARCADOR_INICIO 0x7E // *01111110 em hexadecimal
+#define MARCADOR_INICIO 0x7E // 01111110 em hexadecimal
 
-#define TAMANHO_MAX_DADOS 31 // *5 bits: valores de 0 a 31
-#define SEQUENCIA_MAX 63     // *6 bits: valores de 0 a 63
-#define TIPO_MAX 31          // *5 bits: valores de 0 a 31
+#define TAMANHO_MAX_DADOS 31 // 5 bits: valores de 0 a 31
+#define SEQUENCIA_MAX 63     // 6 bits: valores de 0 a 63
+#define TIPO_MAX 31          // 5 bits: valores de 0 a 31
 
-#define TAMANHO_CABECALHO_PROTOCOLO 3 // *8+5+6+5 bits = 24 bits = 3 bytes
-#define TAMANHO_CRC_PROTOCOLO 1 // 8 bits = 1 byte
+#define TAMANHO_CABECALHO_PROTOCOLO 3 // 8+5+6+5 bits = 24 bits = 3 bytes
+#define TAMANHO_CRC_PROTOCOLO 1       // 8 bits = 1 byte
+
+#define TAMANHO_MAX_PACOTE \
+    (TAMANHO_CABECALHO_PROTOCOLO + TAMANHO_MAX_DADOS + TAMANHO_CRC_PROTOCOLO)
 
 typedef enum
 {
@@ -36,59 +39,47 @@ typedef enum
 } tipo_msg_t;
 
 /*
- * Cabecalho do protocolo PacMan.
- *
- * Formato serializado do pacote:
- *   [marcador_inicio:8][tamanho_dados:5][sequencia:6][tipo:5][dados...][crc]
- *
- * Como 8 + 5 + 6 + 5 = 24 bits, o cabecalho ocupa 3 bytes.
- *
- * Distribuicao dos bits:
- *   byte 0: marcador_inicio
- *   byte 1: tamanho_dados nos 5 bits mais altos + 3 bits mais altos da sequencia
- *   byte 2: 3 bits mais baixos da sequencia + tipo nos 5 bits mais baixos
- *
- * marcador_inicio:
- *   Deve ser sempre 01111110, representado por MARCADOR_INICIO (0x7E).
- *
- * tamanho_dados:
- *   Quantidade de bytes no campo dados. Como o campo tem 5 bits, aceita 0..31.
- * 
- * sequencia:
- *   Numero de sequencia usado pelo controle para-e-espera e pelos ACK/NACK.
- *   Como o campo tem 6 bits, aceita 0..63.
- *
- * tipo:
- *   Codigo da mensagem, usando os valores de tipo_msg_t. Como o campo tem
- *   5 bits, aceita 0..31.
+ * Representacao logica da mensagem dentro do programa.
+ * Essa struct nao é enviada pela rede.
+ * Apenas facilita o acesso aos bits do pacote.
  */
 typedef struct
 {
-    uint8_t byte0; // marcador_inicio
-    uint8_t byte1; // tamanho_dados + parte alta da sequencia
-    uint8_t byte2; // parte baixa da sequencia + tipo
-} cabecalho_protocolo_t;
+    uint8_t tipo_msg;
+    uint8_t num_sequencia_msg;
+    uint8_t tamanho_dados;
+    uint8_t dados[TAMANHO_MAX_DADOS];
+} mensagem_t;
 
-int monta_pacote(
-    uint8_t tipo,
-    uint8_t sequencia,
-    const uint8_t *dados,
-    uint8_t tamanho_dados,
-    uint8_t *saida,
-    size_t capacidade_saida,
-    size_t *tamanho_saida);
+/*
+ * Formato do pacote enviado pela rede:
+ *
+ * [marcador_inicio:8][tamanho_dados:5][sequencia:6][tipo:5][dados...][crc:8]
+ *
+ * Tamanho maximo:
+ *   3 bytes de cabecalho + 31 bytes de dados + 1 byte de CRC = 35 bytes
+ *
+ * Distribuicao:
+ *   pacote[0] = marcador_inicio
+ *
+ *   pacote[1] = tamanho_dados nos 5 bits mais altos
+ *             + 3 bits mais altos da sequencia
+ *
+ *   pacote[2] = 3 bits mais baixos da sequencia
+ *             + tipo nos 5 bits mais baixos
+ *
+ *   pacote[3...] = dados
+ *   pacote[tamanho_total - 1] = crc
+ */
+int monta_pacote(const mensagem_t *mensagem, uint8_t pacote[TAMANHO_MAX_PACOTE],
+                 size_t *tamanho_pacote);
 
-int desmonta_pacote(
-    const uint8_t *entrada,
-    size_t tamanho_entrada,
-    uint8_t *tipo,
-    uint8_t *sequencia,
-    uint8_t *dados,
-    uint8_t *tamanho_dados);
+int desmonta_pacote(const uint8_t *pacote, size_t tamanho_pacote,
+                    mensagem_t *mensagem);
 
-// * Valida se o pacote parece ser válido com base no protocolo definido
-int valida_pacote(
-    const uint8_t *entrada,
-    size_t tamanho_entrada);
+int valida_pacote(const uint8_t *pacote, size_t tamanho_pacote);
+
+// Usado apenas para testes
+void imprime_pacote(const uint8_t *pacote, size_t tamanho_pacote);
 
 #endif

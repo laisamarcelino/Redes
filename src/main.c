@@ -1,8 +1,8 @@
 #define _POSIX_C_SOURCE 200809L
 
-#include "../include/client.h"
-#include "../include/network.h"
-#include "../include/server.h"
+#include "client.h"
+#include "network.h"
+#include "server.h"
 
 #include <getopt.h>
 #include <stdio.h>

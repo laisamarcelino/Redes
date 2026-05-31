@@ -1,2 +1,4 @@
 .codex
+.vscode
+.agents
 tests/build/
