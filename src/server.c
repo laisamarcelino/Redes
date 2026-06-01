@@ -22,25 +22,75 @@ static int tipo_arquivo(uint8_t tipo_msg)
     return tipo_msg == MSG_TXT || tipo_msg == MSG_JPG || tipo_msg == MSG_MP4;
 }
 
-// Escolhe o nome local usado pelo servidor para salvar o arquivo recebido.
-static const char *caminho_saida_arquivo(uint8_t tipo_msg)
+// Escolhe a extensao local usada pelo servidor para salvar o arquivo recebido.
+static const char *extensao_saida_arquivo(uint8_t tipo_msg)
 {
     if (tipo_msg == MSG_TXT)
     {
-        return "recebido.txt";
+        return "txt";
     }
 
     if (tipo_msg == MSG_JPG)
     {
-        return "recebido.jpg";
+        return "jpg";
     }
 
     if (tipo_msg == MSG_MP4)
     {
-        return "recebido.mp4";
+        return "mp4";
     }
 
     return NULL;
+}
+
+// Verifica se um arquivo ja existe sem alterar seu conteudo.
+static int arquivo_existe(const char *caminho)
+{
+    FILE *arquivo = fopen(caminho, "rb");
+
+    if (arquivo == NULL)
+    {
+        return 0;
+    }
+
+    fclose(arquivo);
+    return 1;
+}
+
+// Monta um nome de saida livre para nao sobrescrever arquivos anteriores.
+static int monta_caminho_saida_arquivo(uint8_t tipo_msg, char *caminho_saida,
+                                       size_t tamanho_caminho_saida)
+{
+    const char *extensao = extensao_saida_arquivo(tipo_msg);
+
+    if (extensao == NULL || caminho_saida == NULL || tamanho_caminho_saida == 0)
+    {
+        return -1;
+    }
+
+    // Procura o primeiro nome recebido_NNN.ext que ainda nao existe.
+    for (int indice = 1; indice <= 999; indice++)
+    {
+        int escritos = snprintf(
+            caminho_saida,
+            tamanho_caminho_saida,
+            "recebido_%03d.%s",
+            indice,
+            extensao);
+
+        if (escritos < 0 || (size_t)escritos >= tamanho_caminho_saida)
+        {
+            return -1;
+        }
+
+        if (!arquivo_existe(caminho_saida))
+        {
+            return 0;
+        }
+    }
+
+    fprintf(stderr, "[ERRO] Limite de nomes recebidos_NNN.%s atingido\n", extensao);
+    return -1;
 }
 
 // Função usada para debug
@@ -145,9 +195,12 @@ static void imprime_mensagem_completa(const uint8_t *buffer, size_t tamanho)
 // Grava o buffer remontado quando a transmissao recebida era de arquivo.
 static int salva_arquivo_completo(uint8_t tipo_msg, const uint8_t *buffer, size_t tamanho)
 {
-    const char *caminho_saida = caminho_saida_arquivo(tipo_msg);
+    char caminho_saida[64];
 
-    if (caminho_saida == NULL)
+    if (monta_caminho_saida_arquivo(
+            tipo_msg,
+            caminho_saida,
+            sizeof(caminho_saida)) != 0)
     {
         fprintf(stderr, "[ERRO] Tipo de arquivo sem caminho de saida: %u\n", tipo_msg);
         return -1;
@@ -331,8 +384,6 @@ int executa_servidor(int soquete)
 
         if (mensagem.tipo_msg == MSG_FIM_TRANSMISSAO)
         {
-            sequencia_esperada = calcula_proxima_sequencia(sequencia_esperada);
-
             envia_ack_nack(
                 soquete,
                 MSG_ACK,
@@ -359,6 +410,12 @@ int executa_servidor(int soquete)
             tamanho_recebido = 0;
             capacidade_recebido = 0;
             tipo_transmissao_atual = MSG_DADOS;
+            /*
+             * Cada execucao do cliente comeca a sequencia em 0.
+             * Ao terminar uma transmissao completa, o servidor volta para 0
+             * para aceitar um novo arquivo ou mensagem logo em seguida.
+             */
+            sequencia_esperada = 0;
 
             continue;
         }
