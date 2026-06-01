@@ -14,11 +14,13 @@ static void mostra_uso(const char *programa) {
     fprintf(stderr, "Uso:\n");
     fprintf(stderr, "  %s -s [-l] [-i interface]\n", programa);
     fprintf(stderr, "  %s -c \"mensagem\" [-l] [-i interface]\n", programa);
+    fprintf(stderr, "  %s -c \"arquivo:caminho/do/arquivo.txt\" [-l] [-i interface]\n", programa);
     fprintf(stderr, "\nOpcoes:\n");
     fprintf(stderr, "  -c  modo cliente, enviando a mensagem informada\n");
     fprintf(stderr, "  -s  modo servidor\n");
     fprintf(stderr, "  -l  permite loopback para testes locais\n");
     fprintf(stderr, "  -i  escolhe manualmente a interface de rede. Ex: enp3s0, eth0, lo\n");
+    fprintf(stderr, "\nArquivos suportados: .txt, .jpg, .jpeg e .mp4\n");
 }
 
 // Seleciona o modo cliente ou servidor e abre o socket na interface correta.

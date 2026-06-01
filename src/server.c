@@ -3,6 +3,8 @@
 #include "server.h"
 #include "network.h"
 #include "protocol.h"
+#include "files.h"
+#include "transmission.h"
 
 #include <errno.h>
 #include <stdlib.h>
@@ -12,6 +14,34 @@
 /* ===================================================================
                          FUNÇÕES AUXILIARES
 ======================================================================*/
+uint8_t sequencia_esperada = 0;
+
+// Retorna verdadeiro quando o tipo recebido representa um bloco de arquivo.
+static int tipo_arquivo(uint8_t tipo_msg)
+{
+    return tipo_msg == MSG_TXT || tipo_msg == MSG_JPG || tipo_msg == MSG_MP4;
+}
+
+// Escolhe o nome local usado pelo servidor para salvar o arquivo recebido.
+static const char *caminho_saida_arquivo(uint8_t tipo_msg)
+{
+    if (tipo_msg == MSG_TXT)
+    {
+        return "recebido.txt";
+    }
+
+    if (tipo_msg == MSG_JPG)
+    {
+        return "recebido.jpg";
+    }
+
+    if (tipo_msg == MSG_MP4)
+    {
+        return "recebido.mp4";
+    }
+
+    return NULL;
+}
 
 // Função usada para debug
 static void imprime_mensagem_protocolada(const mensagem_t *mensagem)
@@ -47,64 +77,6 @@ static void imprime_mensagem_protocolada(const mensagem_t *mensagem)
     fflush(stdout);
 }
 
-// Envia uma resposta de controle ao cliente
-static int envia_ack_nack(int soquete, uint8_t tipo_resposta, uint8_t sequencia)
-{
-    mensagem_t resposta;
-    uint8_t pacote[TAMANHO_MAX_PACOTE];
-    size_t tamanho_pacote;
-
-    if (tipo_resposta != MSG_ACK && tipo_resposta != MSG_NACK)
-    {
-        fprintf(stderr,
-                "[ERRO] Tipo de resposta de controle invalido: %u\n",
-                tipo_resposta);
-        return -1;
-    }
-
-    memset(&resposta, 0, sizeof(resposta));
-
-    resposta.tipo_msg = tipo_resposta;
-    resposta.num_sequencia_msg = sequencia;
-    resposta.tamanho_dados = 0; // ACK e NACK nao carregam dados
-
-    // Monta o pacote com a mensagem (ack ou nack)
-    if (monta_pacote(&resposta, pacote, &tamanho_pacote) != 0)
-    {
-        fprintf(stderr, "[ERRO] Falha ao montar resposta de controle\n");
-        return -1;
-    }
-
-    // Envia o pacote de controle pela camada de rede
-    ssize_t enviado = envia_mensagem(soquete, pacote, tamanho_pacote);
-
-    if (enviado < 0)
-    {
-        perror("envia_mensagem resposta controle");
-        return -1;
-    }
-
-    // Confere se todos os bytes do pacote foram enviados
-    if ((size_t)enviado != tamanho_pacote)
-    {
-        fprintf(stderr,
-                "[ERRO] Envio incompleto da resposta. Enviado: %zd, esperado: %zu\n",
-                enviado,
-                tamanho_pacote);
-        return -1;
-    }
-
-    if (tipo_resposta == MSG_ACK)
-    {
-        printf("[DEBUG] ACK enviado para seq=%u\n", sequencia);
-    }
-    else
-    {
-        printf("[DEBUG] NACK enviado para seq=%u\n", sequencia);
-    }
-
-    return 0;
-}
 
 // Responsavel por remontar msgs fragmentadas (protocolo permite 31 bytes por msg)
 static int remonta_mensagem(uint8_t **buffer, size_t *tamanho_atual,
@@ -154,18 +126,6 @@ static int remonta_mensagem(uint8_t **buffer, size_t *tamanho_atual,
     return 0;
 }
 
-// Calcula a proxima sequencia respeitando o limite de 6 bits
-static uint8_t proxima_sequencia(uint8_t sequencia)
-{
-    return (uint8_t)((sequencia + 1) % (SEQUENCIA_MAX + 1));
-}
-
-// Calcula a sequencia anterior respeitando o limite de 6 bits
-static uint8_t sequencia_anterior(uint8_t sequencia)
-{
-    return (sequencia == 0) ? SEQUENCIA_MAX : (uint8_t)(sequencia - 1);
-}
-
 // Imprime o buffer completo remontado
 static void imprime_mensagem_completa(const uint8_t *buffer, size_t tamanho)
 {
@@ -182,6 +142,41 @@ static void imprime_mensagem_completa(const uint8_t *buffer, size_t tamanho)
     fflush(stdout);
 }
 
+// Grava o buffer remontado quando a transmissao recebida era de arquivo.
+static int salva_arquivo_completo(uint8_t tipo_msg, const uint8_t *buffer, size_t tamanho)
+{
+    const char *caminho_saida = caminho_saida_arquivo(tipo_msg);
+
+    if (caminho_saida == NULL)
+    {
+        fprintf(stderr, "[ERRO] Tipo de arquivo sem caminho de saida: %u\n", tipo_msg);
+        return -1;
+    }
+
+    FILE *arquivo = fopen(caminho_saida, "wb");
+    if (arquivo == NULL)
+    {
+        perror("fopen arquivo recebido");
+        return -1;
+    }
+
+    // Arquivos binarios precisam ser escritos exatamente byte a byte.
+    if (tamanho > 0 && fwrite(buffer, 1, tamanho, arquivo) != tamanho)
+    {
+        perror("fwrite arquivo recebido");
+        fclose(arquivo);
+        return -1;
+    }
+
+    fclose(arquivo);
+
+    printf("[DEBUG] Arquivo recebido salvo em %s com %zu bytes\n",
+           caminho_saida,
+           tamanho);
+
+    return 0;
+}
+
 /* ===================================================================
                          FUNÇÕES PRINCIPAIS
 ======================================================================*/
@@ -196,6 +191,7 @@ int executa_servidor(int soquete)
     size_t tamanho_recebido = 0;
     size_t capacidade_recebido = 0;
     uint8_t sequencia_esperada = 0;
+    uint8_t tipo_transmissao_atual = MSG_DADOS;
 
     printf("Servidor aguardando pacotes do protocolo PacMan...\n");
 
@@ -241,8 +237,7 @@ int executa_servidor(int soquete)
             if (recebido >= TAMANHO_CABECALHO_PROTOCOLO &&
                 pacote[0] == MARCADOR_INICIO)
             {
-                uint8_t sequencia_erro = (uint8_t)(((pacote[1] & 0x07) << 3) |
-                                                   ((pacote[2] >> 5) & 0x07));
+                uint8_t sequencia_erro = extrai_sequencia_pacote_bruto(pacote);
 
                 envia_ack_nack(
                     soquete,
@@ -258,7 +253,8 @@ int executa_servidor(int soquete)
          * de novo, mas reenvia ACK. Isso evita duplicar os dados
          */
         // Reenvio da ultima sequencia ja aceita recebe ACK sem duplicar dados
-        if (mensagem.num_sequencia_msg == sequencia_anterior(sequencia_esperada))
+        if (mensagem.num_sequencia_msg ==
+            calcula_sequencia_anterior(sequencia_esperada))
         {
             envia_ack_nack(
                 soquete,
@@ -296,7 +292,7 @@ int executa_servidor(int soquete)
                 return -1;
             }
 
-            sequencia_esperada = proxima_sequencia(sequencia_esperada);
+            sequencia_esperada = calcula_proxima_sequencia(sequencia_esperada);
 
             envia_ack_nack(
                 soquete,
@@ -307,21 +303,62 @@ int executa_servidor(int soquete)
         }
 
         // Trata o fim da transmissao
-        if (mensagem.tipo_msg == MSG_FIM_TRANSMISSAO)
+        // Fragmentos de arquivo tambem sao acumulados ate o fim da transmissao.
+        if (tipo_arquivo(mensagem.tipo_msg))
         {
-            sequencia_esperada = proxima_sequencia(sequencia_esperada);
+            tipo_transmissao_atual = mensagem.tipo_msg;
+
+            if (remonta_mensagem(
+                    &buffer_recebido,
+                    &tamanho_recebido,
+                    &capacidade_recebido,
+                    mensagem.dados,
+                    mensagem.tamanho_dados) != 0)
+            {
+                free(buffer_recebido);
+                return -1;
+            }
+
+            sequencia_esperada = calcula_proxima_sequencia(sequencia_esperada);
 
             envia_ack_nack(
                 soquete,
                 MSG_ACK,
                 mensagem.num_sequencia_msg);
 
-            imprime_mensagem_completa(buffer_recebido, tamanho_recebido);
+            continue;
+        }
+
+        if (mensagem.tipo_msg == MSG_FIM_TRANSMISSAO)
+        {
+            sequencia_esperada = calcula_proxima_sequencia(sequencia_esperada);
+
+            envia_ack_nack(
+                soquete,
+                MSG_ACK,
+                mensagem.num_sequencia_msg);
+
+            if (tipo_arquivo(tipo_transmissao_atual))
+            {
+                if (salva_arquivo_completo(
+                        tipo_transmissao_atual,
+                        buffer_recebido,
+                        tamanho_recebido) != 0)
+                {
+                    free(buffer_recebido);
+                    return -1;
+                }
+            }
+            else
+            {
+                imprime_mensagem_completa(buffer_recebido, tamanho_recebido);
+            }
 
             free(buffer_recebido);
             buffer_recebido = NULL;
             tamanho_recebido = 0;
             capacidade_recebido = 0;
+            tipo_transmissao_atual = MSG_DADOS;
 
             continue;
         }
@@ -330,7 +367,7 @@ int executa_servidor(int soquete)
         imprime_mensagem_protocolada(&mensagem);
 
         // Avança a sequencia
-        sequencia_esperada = proxima_sequencia(sequencia_esperada);
+        sequencia_esperada = calcula_proxima_sequencia(sequencia_esperada);
 
         // Confirma o recebimento da msg
         envia_ack_nack(
