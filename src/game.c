@@ -69,42 +69,18 @@ static int posicao_valida(int x, int y)
     return x >= 0 && x < LINHAS && y >= 0 && y < COLUNAS;
 }
 
-// Retorna qual é a posição (x,y) que o personagem ocupa
-static int posicao_do_personagem(const personagem_t *personagem, int x, int y)
+static int personagem_ocupa_posicao(const personagem_t *personagem, int x, int y)
 {
     if (personagem == NULL)
-        return ERRO;
+        return 0;
 
     if (!personagem->ativo)
-        return ERRO;
+        return 0;
 
     return personagem->posicao_x == x && personagem->posicao_y == y;
 }
 
 // Retorna se uma posição esta ocupada ou não
-static int posicao_ocupada(const jogo_t *jogo, int x, int y)
-{
-    if (jogo == NULL)
-        return ERRO;
-
-    if (personagem_ocupa_posicao(&jogo->pacman, x, y))
-        return SIM;
-
-    if (personagem_ocupa_posicao(&jogo->fantasma_vermelho, x, y))
-        return SIM;
-
-    if (personagem_ocupa_posicao(&jogo->fantasma_azul, x, y))
-        return SIM;
-
-    if (personagem_ocupa_posicao(&jogo->fantasma_verde, x, y))
-        return SIM;
-
-    if (personagem_ocupa_posicao(&jogo->fantasma_amarelo, x, y))
-        return SIM;
-
-    return NAO;
-}
-
 static int posicao_livre(const jogo_t *jogo, int x, int y)
 {
     if (jogo == NULL)
@@ -116,13 +92,25 @@ static int posicao_livre(const jogo_t *jogo, int x, int y)
     if (jogo->mapa[x][y] != LAB_VAZIO)
         return 0;
 
-    if (posicao_ocupada_por_personagem(jogo, x, y))
+    if (personagem_ocupa_posicao(&jogo->pacman, x, y))
+        return 0;
+
+    if (personagem_ocupa_posicao(&jogo->fantasma_vermelho, x, y))
+        return 0;
+
+    if (personagem_ocupa_posicao(&jogo->fantasma_azul, x, y))
+        return 0;
+
+    if (personagem_ocupa_posicao(&jogo->fantasma_verde, x, y))
+        return 0;
+
+    if (personagem_ocupa_posicao(&jogo->fantasma_amarelo, x, y))
         return 0;
 
     return 1;
 }
 
-static void inicializa_sorteio_uma_vez(void)
+static void sorteia_posicao_personagens(void)
 {
     static int inicializado = 0;
 
@@ -219,7 +207,7 @@ int carrega_mapa_csv(jogo_t *jogo, const char *caminho_csv)
 
             simbolo = token[0];
 
-            if (eh_simbolo_mapa_base_valido(simbolo) != SUCESSO)
+            if (eh_representacao_valida(simbolo) != SUCESSO)
             {
                 fprintf(stderr,
                         "[ERRO] Simbolo invalido '%c' na posicao x=%d, y=%d. Use apenas '0' ou 'X'.\n",
@@ -241,3 +229,54 @@ int carrega_mapa_csv(jogo_t *jogo, const char *caminho_csv)
     return SUCESSO;
 }
 
+int sorteia_posicao(const jogo_t *jogo, int *x, int *y)
+{
+    int total_livres = 0;
+    int alvo;
+    int contador = 0;
+
+    if (jogo == NULL || x == NULL || y == NULL)
+    {
+        fprintf(stderr, "[ERRO] Parametro invalido em sorteia_posicao.\n");
+        return ERRO;
+    }
+
+    sorteia_posicao_personagens();
+
+    for (int i = 0; i < LINHAS; i++)
+    {
+        for (int j = 0; j < COLUNAS; j++)
+        {
+            if (posicao_livre(jogo, i, j))
+                total_livres++;
+        }
+    }
+
+    if (total_livres == 0)
+    {
+        fprintf(stderr, "[ERRO] Nao ha posicao livre disponivel no mapa.\n");
+        return ERRO;
+    }
+
+    alvo = rand() % total_livres;
+
+    for (int i = 0; i < LINHAS; i++)
+    {
+        for (int j = 0; j < COLUNAS; j++)
+        {
+            if (posicao_livre(jogo, i, j))
+            {
+                if (contador == alvo)
+                {
+                    *x = i;
+                    *y = j;
+                    return SUCESSO;
+                }
+
+                contador++;
+            }
+        }
+    }
+
+    return ERRO;
+}
