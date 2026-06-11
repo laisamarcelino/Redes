@@ -1,0 +1,319 @@
+#define _POSIX_C_SOURCE 200809L
+
+#include "transmission.h"
+#include "network.h"
+#include "protocol.h"
+
+#include <errno.h>
+#include <stdio.h>
+#include <string.h>
+
+#define SUCESSO 0
+#define ERRO -1
+
+/* ===================================================================
+                         FUNÇÕES PRINCIPAIS
+======================================================================*/
+
+// Envia uma resposta de controle ao cliente
+int envia_ack_nack(int soquete, uint8_t tipo_resposta, uint8_t sequencia)
+{
+    mensagem_t resposta;
+    uint8_t pacote[TAMANHO_MAX_PACOTE];
+    size_t tamanho_pacote;
+
+    if (tipo_resposta != MSG_ACK && tipo_resposta != MSG_NACK)
+    {
+        fprintf(stderr,
+                "[ERRO] Tipo de resposta de controle invalido: %u\n",
+                tipo_resposta);
+        return ERRO;
+    }
+
+    memset(&resposta, 0, sizeof(resposta));
+
+    resposta.tipo_msg = tipo_resposta;
+    resposta.num_sequencia_msg = sequencia;
+    resposta.tamanho_dados = 0; // ACK e NACK nao carregam dados
+
+    // Monta o pacote com a mensagem (ack ou nack)
+    if (monta_pacote(&resposta, pacote, &tamanho_pacote) != 0)
+    {
+        fprintf(stderr, "[ERRO] Falha ao montar resposta de controle\n");
+        return ERRO;
+    }
+
+    // Envia o pacote de controle pela camada de rede
+    ssize_t enviado = envia_mensagem(soquete, pacote, tamanho_pacote);
+
+    if (enviado < 0)
+    {
+        perror("envia_mensagem resposta controle");
+        return ERRO;
+    }
+
+    // Confere se todos os bytes do pacote foram enviados
+    if ((size_t)enviado != tamanho_pacote)
+    {
+        fprintf(stderr,
+                "[ERRO] Envio incompleto da resposta. Enviado: %zd, esperado: %zu\n",
+                enviado,
+                tamanho_pacote);
+        return ERRO;
+    }
+
+    if (tipo_resposta == MSG_ACK)
+    {
+        printf("[DEBUG] ACK enviado para seq=%u\n", sequencia);
+    }
+    else
+    {
+        printf("[DEBUG] NACK enviado para seq=%u\n", sequencia);
+    }
+
+    return SUCESSO;
+}
+
+int espera_ack_nack_com_timeout(int soquete, uint8_t sequencia_esperada)
+{
+    // Buffer que recebe o pacote de resposta
+    uint8_t pacote_resposta[TAMANHO_MAX_PACOTE];
+    mensagem_t resposta;
+
+    while (1)
+    {
+        // Aguarda uma resposta respeitando o limite de tempo
+        ssize_t recebido = espera_mensagem_timeout(
+            soquete,
+            pacote_resposta,
+            sizeof(pacote_resposta),
+            TIMEOUT_ACK_MS);
+
+        // Se nao tiver resposta dentro do prazo, avisa o chamador
+        if (recebido == REDE_TIMEOUT)
+        {
+            fprintf(stderr,
+                    "[DEBUG] Timeout esperando ACK/NACK seq=%u\n",
+                    sequencia_esperada);
+            return REDE_TIMEOUT;
+        }
+
+        // Interrupcoes por sinal nao encerram a espera
+        if (recebido < 0)
+        {
+            if (errno == EINTR)
+            {
+                continue;
+            }
+
+            perror("espera_mensagem_timeout");
+            return ERRO;
+        }
+
+        // Ignora leituras vazias
+        if (recebido == 0)
+        {
+            continue;
+        }
+
+        // Converte o pacote recebido em mensagem
+        if (desmonta_pacote(
+                pacote_resposta,
+                (size_t)recebido,
+                &resposta) != 0)
+        {
+            fprintf(stderr, "[ERRO] Cliente recebeu pacote invalido\n");
+            return ERRO;
+        }
+
+        // Ignora resposta de outra sequencia
+        if (resposta.num_sequencia_msg != sequencia_esperada)
+        {
+            fprintf(stderr,
+                    "[DEBUG] Resposta ignorada. Esperado seq=%u, recebido seq=%u\n",
+                    sequencia_esperada,
+                    resposta.num_sequencia_msg);
+            continue;
+        }
+
+        // ACK confirma o pacote enviado
+        if (resposta.tipo_msg == MSG_ACK)
+        {
+            printf("[DEBUG] ACK recebido para seq=%u\n", sequencia_esperada);
+            return MSG_ACK;
+        }
+
+        // NACK pede reenvio do pacote
+        if (resposta.tipo_msg == MSG_NACK)
+        {
+            printf("[DEBUG] NACK recebido para seq=%u\n", sequencia_esperada);
+            return MSG_NACK;
+        }
+
+        // Outros tipos sao ignorados enquanto o prazo nao acaba
+        fprintf(stderr,
+                "[DEBUG] Tipo de resposta ignorado: %u\n",
+                resposta.tipo_msg);
+    }
+}
+
+/* APAGAR
+ *
+ * Fluxo para-e-espera
+ * envia pacote
+ * espera ACK/NACK
+ * se ACK: confirma
+ * se NACK: reenvia
+ * se timeout: reenvia
+ */
+// Envia uma unica mensagem de tamanho maximo 31 bytes
+int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem, uint8_t *proxima_sequencia)
+{
+    // Buffer do pacote montado pelo protocolo
+    uint8_t pacote[TAMANHO_MAX_PACOTE];
+    size_t tamanho_pacote;
+
+    /* APAGAR
+     * A sequência é definida aqui.
+     * Em caso de reenvio, a mesma sequência é mantida.
+     */
+    if (mensagem == NULL || proxima_sequencia == NULL)
+    {
+        fprintf(stderr, "[ERRO] Parametro nulo em envia_pacote_com_reenvio\n");
+        return ERRO;
+    }
+
+    // Define a sequência atual; reenvios mantem este mesmo numero.
+    mensagem->num_sequencia_msg = *proxima_sequencia;
+
+    if (monta_pacote(mensagem, pacote, &tamanho_pacote) != 0)
+    {
+        fprintf(stderr, "[ERRO] Falha ao montar pacote\n");
+        return ERRO;
+    }
+
+    // Repete o envio ate confirmar ou estourar o limite
+    for (int tentativa = 1; tentativa <= MAX_TENTATIVAS_ENVIO; tentativa++)
+    {
+        // Copia usada nesta tentativa de envio
+        uint8_t pacote_envio[TAMANHO_MAX_PACOTE];
+
+        /* APAGAR
+         * Enviamos uma cópia.
+         * Isso ajuda nos testes de corrupção e evita alterar o pacote original.
+         */
+        // Enviamos uma copia para evitar alterar o pacote original
+        memcpy(pacote_envio, pacote, tamanho_pacote);
+
+        printf("[DEBUG] Enviando pacote tipo=%u seq=%u tam=%u tentativa %d/%d\n",
+               mensagem->tipo_msg,
+               mensagem->num_sequencia_msg,
+               mensagem->tamanho_dados,
+               tentativa,
+               MAX_TENTATIVAS_ENVIO);
+
+        // Envia o pacote pela camada de rede
+        ssize_t enviado = envia_mensagem(
+            soquete,
+            pacote_envio,
+            tamanho_pacote);
+
+        // Trata erros de envio e interrupcoes
+        if (enviado < 0)
+        {
+            if (errno == EINTR)
+            {
+                tentativa--;
+                continue;
+            }
+
+            perror("envia_mensagem");
+            return ERRO;
+        }
+
+        // Confere se o envio foi completo
+        if ((size_t)enviado != tamanho_pacote)
+        {
+            fprintf(stderr,
+                    "[ERRO] Envio incompleto. Enviado: %zd, esperado: %zu\n",
+                    enviado,
+                    tamanho_pacote);
+            return ERRO;
+        }
+
+        // Espera resposta referente a mesma sequencia
+        int resposta = espera_ack_nack_com_timeout(
+            soquete,
+            mensagem->num_sequencia_msg);
+
+        // ACK libera o proximo numero de sequencia
+        if (resposta == MSG_ACK)
+        {
+            printf("[DEBUG] ACK recebido para seq=%u\n",
+                   mensagem->num_sequencia_msg);
+
+            *proxima_sequencia = calcula_proxima_sequencia(*proxima_sequencia);
+
+            return SUCESSO;
+        }
+
+        // NACK faz repetir a mesma sequencia
+        if (resposta == MSG_NACK)
+        {
+            fprintf(stderr,
+                    "[DEBUG] NACK recebido para seq=%u. Reenviando...\n",
+                    mensagem->num_sequencia_msg);
+            continue;
+        }
+
+        // Timeout tambem faz repetir a mesma sequencia
+        if (resposta == REDE_TIMEOUT)
+        {
+            fprintf(stderr,
+                    "[DEBUG] Timeout esperando resposta da seq=%u. Reenviando...\n",
+                    mensagem->num_sequencia_msg);
+            continue;
+        }
+
+        fprintf(stderr, "[ERRO] Falha inesperada esperando ACK/NACK\n");
+        return ERRO;
+    }
+
+    // Todas as tentativas foram consumidas
+    fprintf(stderr,
+            "[ERRO] Número máximo de tentativas atingido para seq=%u\n",
+            mensagem->num_sequencia_msg);
+
+    return ERRO;
+}
+
+// Calcula a proxima sequencia respeitando o limite de 6 bits
+uint8_t calcula_proxima_sequencia(uint8_t sequencia)
+{
+    return (uint8_t)((sequencia + 1) % (SEQUENCIA_MAX + 1));
+}
+
+// Calcula a sequencia anterior respeitando o limite de 6 bits
+uint8_t calcula_sequencia_anterior(uint8_t sequencia)
+{
+    return (sequencia == 0) ? SEQUENCIA_MAX : (uint8_t)(sequencia - 1);
+}
+
+/* APAGAR
+ *  Se o pacote falhou na validação, mas possui cabeçalho mínimo
+ * e marcador de início correto, ainda conseguimos extrair a sequência
+ * para enviar NACK.
+ *
+ * Isso cobre, por exemplo, pacotes com CRC inválido.
+ */
+// Se falhar, o servidor manda NACK, se conseguir extrair a sequência do cabeçalho
+uint8_t extrai_sequencia_pacote_bruto(const uint8_t *pacote)
+{
+    if (pacote == NULL)
+    {
+        return SUCESSO;
+    }
+
+    return (uint8_t)(((pacote[1] & 0x07) << 3) |
+                     ((pacote[2] >> 5) & 0x07));
+}
