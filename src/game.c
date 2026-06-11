@@ -16,9 +16,6 @@
 #define DIRECAO_BAIXO 2
 #define DIRECAO_ESQUERDA 3
 
-#define NAO 0
-#define SIM 1
-
 /* ===================================================================
                          FUNCOES AUXILIARES
 ======================================================================*/
@@ -69,6 +66,7 @@ static int posicao_valida(int x, int y)
     return x >= 0 && x < LINHAS && y >= 0 && y < COLUNAS;
 }
 
+// Verifica se um dado personagem ocupa uma posição dada
 static int personagem_ocupa_posicao(const personagem_t *personagem, int x, int y)
 {
     if (personagem == NULL)
@@ -150,8 +148,8 @@ void inicializa_jogo(jogo_t *jogo)
     jogo->pastilhas_coletadas = 0;
     jogo->ultima_pastilha_coletada = 0;
 
-    jogo->terminou = NAO;
-    jogo->venceu = NAO;
+    jogo->terminou = 0;
+    jogo->venceu = 0;
 }
 
 int carrega_mapa_csv(jogo_t *jogo, const char *caminho_csv)
