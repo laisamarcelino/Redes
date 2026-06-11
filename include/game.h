@@ -38,7 +38,7 @@ typedef enum {
     JOGO_DERROTA = 2
 } jogo_resultado_t;
 
-/* Representa um personagem movel, separado do mapa base. */
+/* Representa um personagem */
 typedef struct {
     int posicao_x;
     int posicao_y;
@@ -77,12 +77,6 @@ typedef struct {
 void inicializa_jogo(jogo_t *jogo);
 
 /*
- * Cria o mapa padrao com paredes e sorteia posicoes para PacMan,
- * fantasmas e pastilhas.
- */
-void inicializa_mapa_padrao(jogo_t *jogo);
-
-/*
  * Carrega um mapa 40x40 de um CSV separado por ';'.
  * Aceita os simbolos definidos em representacao_labirinto_t.
  */
@@ -94,30 +88,4 @@ int carrega_mapa_csv(jogo_t *jogo, const char *caminho_csv);
  */
 int sorteia_posicao(const jogo_t *jogo, int *x, int *y);
 
-/*
-int aplica_movimento_pacman(
-    jogo_t *jogo,
-    uint8_t movimento,
-    int *pastilha_coletada
-);
-
-void move_fantasmas(jogo_t *jogo);
-
-jogo_resultado_t executa_rodada(
-    jogo_t *jogo,
-    uint8_t movimento,
-    int *pastilha_coletada
-);
-
-int gera_visualizacao(
-    const jogo_t *jogo,
-    char *saida,
-    size_t tamanho_saida
-);
-
-int jogo_colidiu_fantasma(const jogo_t *jogo);
-int jogo_acabou(const jogo_t *jogo);
-
-const char *jogo_caminho_premio(int numero_pastilha);
-*/
 #endif
