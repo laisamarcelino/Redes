@@ -94,7 +94,6 @@ int carrega_mapa_csv(jogo_t *jogo, const char *caminho_csv);
  */
 int sorteia_posicao(const jogo_t *jogo, int *x, int *y);
 
-/*
 int aplica_movimento_pacman(
     jogo_t *jogo,
     uint8_t movimento,
@@ -119,5 +118,5 @@ int jogo_colidiu_fantasma(const jogo_t *jogo);
 int jogo_acabou(const jogo_t *jogo);
 
 const char *jogo_caminho_premio(int numero_pastilha);
-*/
+
 #endif
