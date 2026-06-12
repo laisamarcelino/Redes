@@ -16,6 +16,7 @@
                          FUNÇÕES AUXILIARES
 ======================================================================*/
 uint8_t sequencia_esperada = 0;
+static uint8_t proxima_sequencia_servidor = 0;
 
 #define CAMINHO_MAPA_PADRAO "maps/padrao_ufpr.csv"
 
@@ -202,6 +203,103 @@ static void imprime_mensagem_protocolada(const mensagem_t *mensagem)
     fflush(stdout);
 }
 
+static int envia_buffer_protocolado_servidor(
+    int soquete,
+    uint8_t tipo_msg,
+    const uint8_t *buffer,
+    size_t tamanho_buffer)
+{
+    size_t offset = 0;
+
+    if (buffer == NULL && tamanho_buffer > 0)
+    {
+        fprintf(stderr, "[ERRO] Buffer nulo em envio do servidor\n");
+        return -1;
+    }
+
+    /*
+     * A visualizacao pode ser maior que 31 bytes. Reaproveitamos o
+     * mesmo modelo de fragmentacao do envio de mensagens/arquivos.
+     */
+    while (offset < tamanho_buffer)
+    {
+        mensagem_t mensagem;
+        size_t bytes_restantes = tamanho_buffer - offset;
+        uint8_t tamanho_bloco;
+
+        memset(&mensagem, 0, sizeof(mensagem));
+
+        tamanho_bloco = bytes_restantes > TAMANHO_MAX_DADOS
+                            ? TAMANHO_MAX_DADOS
+                            : (uint8_t)bytes_restantes;
+
+        mensagem.tipo_msg = tipo_msg;
+        mensagem.tamanho_dados = tamanho_bloco;
+        memcpy(mensagem.dados, buffer + offset, tamanho_bloco);
+
+        if (envia_pacote_com_reenvio(
+                soquete,
+                &mensagem,
+                &proxima_sequencia_servidor) != 0)
+        {
+            fprintf(stderr, "[ERRO] Falha ao enviar resposta do servidor\n");
+            return -1;
+        }
+
+        offset += tamanho_bloco;
+    }
+
+    mensagem_t fim;
+    memset(&fim, 0, sizeof(fim));
+    fim.tipo_msg = MSG_FIM_TRANSMISSAO;
+    fim.tamanho_dados = 0;
+
+    return envia_pacote_com_reenvio(
+        soquete,
+        &fim,
+        &proxima_sequencia_servidor);
+}
+
+static int envia_visualizacao_jogo(int soquete, const jogo_t *jogo)
+{
+    char visualizacao[JOGO_VISUALIZACAO_MAX];
+
+    if (gera_visualizacao(jogo, visualizacao, sizeof(visualizacao)) != 0)
+    {
+        fprintf(stderr, "[ERRO] Falha ao gerar visualizacao do jogo\n");
+        return -1;
+    }
+
+    return envia_buffer_protocolado_servidor(
+        soquete,
+        MSG_VISUALIZACAO,
+        (const uint8_t *)visualizacao,
+        strlen(visualizacao));
+}
+
+static int envia_arquivo_se_existir(int soquete, const char *caminho)
+{
+    uint8_t tipo;
+
+    if (caminho == NULL || !arquivo_existe(caminho))
+    {
+        return 0;
+    }
+
+    tipo = tipo_arquivo_por_caminho(caminho);
+    if (tipo == MSG_ERRO)
+    {
+        fprintf(stderr, "[ERRO] Arquivo de premio sem tipo suportado: %s\n", caminho);
+        return -1;
+    }
+
+    return envia_arquivo_protocolado(
+        soquete,
+        caminho,
+        tipo,
+        &proxima_sequencia_servidor);
+}
+
 
 /*
  * Acrescenta um fragmento recebido ao buffer da transmissao atual.
@@ -377,6 +475,7 @@ int executa_servidor(int soquete)
         return -1;
     }
 
+    inicializa_mapa_padrao(&jogo);
     printf("Servidor aguardando pacotes do protocolo PacMan...\n");
 
     while (1)
@@ -463,6 +562,72 @@ int executa_servidor(int soquete)
         }
 
         // Fragmentos de dados sao acumulados ate o fim da transmissao
+        if (mensagem.tipo_msg == MSG_INICIALIZACAO)
+        {
+            inicializa_mapa_padrao(&jogo);
+            sequencia_esperada = calcula_proxima_sequencia(sequencia_esperada);
+
+            envia_ack_nack(
+                soquete,
+                MSG_ACK,
+                mensagem.num_sequencia_msg);
+
+            if (envia_visualizacao_jogo(soquete, &jogo) != 0)
+            {
+                free(buffer_recebido);
+                return -1;
+            }
+
+            continue;
+        }
+
+        if (tipo_movimento(mensagem.tipo_msg))
+        {
+            int pastilha_coletada = 0;
+            jogo_resultado_t resultado;
+
+            jogo.ultima_pastilha_coletada = 0;
+            resultado = executa_rodada(
+                &jogo,
+                mensagem.tipo_msg,
+                &pastilha_coletada);
+
+            sequencia_esperada = calcula_proxima_sequencia(sequencia_esperada);
+
+            envia_ack_nack(
+                soquete,
+                MSG_ACK,
+                mensagem.num_sequencia_msg);
+
+            if (envia_visualizacao_jogo(soquete, &jogo) != 0)
+            {
+                free(buffer_recebido);
+                return -1;
+            }
+
+            if (pastilha_coletada > 0)
+            {
+                if (envia_arquivo_se_existir(
+                        soquete,
+                        jogo_caminho_premio(pastilha_coletada)) != 0)
+                {
+                    free(buffer_recebido);
+                    return -1;
+                }
+            }
+
+            if (resultado == JOGO_DERROTA)
+            {
+                if (envia_arquivo_se_existir(soquete, "assets/ghost_hit.txt") != 0)
+                {
+                    free(buffer_recebido);
+                    return -1;
+                }
+            }
+
+            continue;
+        }
+
         if (mensagem.tipo_msg == MSG_DADOS)
         {
             if (remonta_mensagem(
