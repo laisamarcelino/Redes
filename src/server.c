@@ -19,12 +19,20 @@ uint8_t sequencia_esperada = 0;
 
 #define CAMINHO_MAPA_PADRAO "maps/padrao_ufpr.csv"
 
+/*
+ * Verifica se o tipo de mensagem pertence aos tipos usados para transmitir
+ * arquivos de premio ou arquivos recebidos em blocos.
+ */
 // Retorna verdadeiro quando o tipo recebido representa um bloco de arquivo.
 static int tipo_arquivo(uint8_t tipo_msg)
 {
     return tipo_msg == MSG_TXT || tipo_msg == MSG_JPG || tipo_msg == MSG_MP4;
 }
 
+/*
+ * Verifica se a mensagem recebida do cliente e uma jogada de movimento do
+ * PacMan.
+ */
 // Retorna verdadeiro quando a mensagem representa um movimento do PacMan.
 static int tipo_movimento(uint8_t tipo_msg)
 {
@@ -34,6 +42,10 @@ static int tipo_movimento(uint8_t tipo_msg)
            tipo_msg == MSG_MOV_DIREITA;
 }
 
+/*
+ * Traduz o tipo de movimento do protocolo para deslocamento de linha e coluna
+ * na matriz do labirinto.
+ */
 // Converte o tipo de movimento do protocolo para deslocamento na matriz.
 static int deslocamento_movimento(uint8_t tipo_msg, int *deslocamento_x, int *deslocamento_y)
 {
@@ -68,6 +80,10 @@ static int deslocamento_movimento(uint8_t tipo_msg, int *deslocamento_x, int *de
     }
 }
 
+/*
+ * Retorna a extensao usada para salvar um arquivo recebido, de acordo com o
+ * tipo de mensagem do protocolo.
+ */
 // Escolhe a extensao local usada pelo servidor para salvar o arquivo recebido.
 static const char *extensao_saida_arquivo(uint8_t tipo_msg)
 {
@@ -89,6 +105,10 @@ static const char *extensao_saida_arquivo(uint8_t tipo_msg)
     return NULL;
 }
 
+/*
+ * Testa se um caminho ja existe no disco.
+ * Usado para escolher um nome de saida sem sobrescrever arquivo anterior.
+ */
 // Verifica se um arquivo ja existe sem alterar seu conteudo.
 static int arquivo_existe(const char *caminho)
 {
@@ -103,6 +123,11 @@ static int arquivo_existe(const char *caminho)
     return 1;
 }
 
+/*
+ * Monta um caminho recebido_NNN.ext disponivel para salvar o proximo arquivo.
+ * Retorna erro se a extensao nao for suportada, se o buffer for invalido ou se
+ * todos os nomes ate recebido_999.ext ja existirem.
+ */
 // Monta um nome de saida livre para nao sobrescrever arquivos anteriores.
 static int monta_caminho_saida_arquivo(uint8_t tipo_msg, char *caminho_saida,
                                        size_t tamanho_caminho_saida)
@@ -139,6 +164,10 @@ static int monta_caminho_saida_arquivo(uint8_t tipo_msg, char *caminho_saida,
     return -1;
 }
 
+/*
+ * Imprime no terminal os campos de uma mensagem protocolada.
+ * Serve para debug de pacotes recebidos que nao sao tratados por outro fluxo.
+ */
 // Função usada para debug
 static void imprime_mensagem_protocolada(const mensagem_t *mensagem)
 {
@@ -174,6 +203,10 @@ static void imprime_mensagem_protocolada(const mensagem_t *mensagem)
 }
 
 
+/*
+ * Acrescenta um fragmento recebido ao buffer da transmissao atual.
+ * A funcao realoca o buffer quando o espaco disponivel nao e suficiente.
+ */
 // Responsavel por remontar msgs fragmentadas (protocolo permite 31 bytes por msg)
 static int remonta_mensagem(uint8_t **buffer, size_t *tamanho_atual,
                             size_t *capacidade, const uint8_t *dados,
@@ -222,6 +255,10 @@ static int remonta_mensagem(uint8_t **buffer, size_t *tamanho_atual,
     return 0;
 }
 
+/*
+ * Imprime no terminal uma mensagem completa depois que todos os fragmentos
+ * foram recebidos.
+ */
 // Imprime o buffer completo remontado
 static void imprime_mensagem_completa(const uint8_t *buffer, size_t tamanho)
 {
@@ -238,6 +275,10 @@ static void imprime_mensagem_completa(const uint8_t *buffer, size_t tamanho)
     fflush(stdout);
 }
 
+/*
+ * Salva no disco um arquivo recebido por transmissao fragmentada.
+ * O nome de saida e escolhido automaticamente para evitar sobrescrita.
+ */
 // Grava o buffer remontado quando a transmissao recebida era de arquivo.
 static int salva_arquivo_completo(uint8_t tipo_msg, const uint8_t *buffer, size_t tamanho)
 {
@@ -276,6 +317,10 @@ static int salva_arquivo_completo(uint8_t tipo_msg, const uint8_t *buffer, size_
     return 0;
 }
 
+/*
+ * Gera a visualizacao textual do jogo e envia esse buffer ao cliente usando
+ * fragmentacao do protocolo e controle de ACK/NACK.
+ */
 // Gera a visualizacao atual do jogo e envia o mapa completo ao cliente.
 static int envia_mapa_completo(int soquete, const jogo_t *jogo)
 {
@@ -304,6 +349,11 @@ static int envia_mapa_completo(int soquete, const jogo_t *jogo)
                          FUNÇÕES PRINCIPAIS
 ======================================================================*/
 
+/*
+ * Executa o loop principal do servidor.
+ * Inicializa o jogo, recebe pacotes do cliente, valida sequencia/CRC, trata
+ * pedidos de mapa, movimentos, arquivos e mensagens comuns, e envia ACK/NACK.
+ */
 // Fica em loop infinito esperando pacotes
 int executa_servidor(int soquete)
 {

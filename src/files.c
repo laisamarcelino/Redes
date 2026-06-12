@@ -212,11 +212,12 @@ int recebe_arquivo_protocolado(
             continue;
         }
 
-        /*
+        /* APAGAR
          * Caso o ACK anterior tenha se perdido, o emissor pode reenviar
          * o último pacote já aceito. Nesse caso respondemos ACK de novo,
          * mas não escrevemos os dados duplicados no arquivo.
          */
+        // Evita duplicação de arquivo perdido. Reenvia o ultimo já aceito  
         if (mensagem.num_sequencia_msg ==
             calcula_sequencia_anterior(*sequencia_esperada))
         {

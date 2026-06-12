@@ -40,7 +40,11 @@ static uint8_t tipo_movimento_por_texto(const char *mensagem)
     return MSG_ERRO;
 }
 
-// APAGAR - Entender isso aqui
+/* APAGAR - Entender isso aqui
+ * Junta um fragmento recebido em um buffer dinamico.
+ * A funcao aumenta a capacidade quando necessario e mantém o buffer terminado
+ * em '\0' para permitir imprimir a visualizacao como texto.
+ */
 // Acrescenta um fragmento recebido ao buffer remontado.
 static int acumula_fragmento(uint8_t **buffer, size_t *tamanho_atual,
                              size_t *capacidade, const uint8_t *dados,
@@ -78,7 +82,7 @@ static int acumula_fragmento(uint8_t **buffer, size_t *tamanho_atual,
     return 0;
 }
 
-// Envia ao servidor um pedido simples para iniciar/consultar o mapa do jogo.
+// Monta e envia uma mensagem de inicializacao para pedir ao servidor o mapa atual
 static int envia_pedido_mapa(int soquete)
 {
     mensagem_t mensagem;
@@ -93,6 +97,11 @@ static int envia_pedido_mapa(int soquete)
         &proxima_sequencia_cliente);
 }
 
+/* APAGAR
+ * Monta e envia uma mensagem de movimento do PacMan.
+ * O tipo da mensagem ja chega convertido para MSG_MOV_CIMA, MSG_MOV_BAIXO,
+ * MSG_MOV_ESQUERDA ou MSG_MOV_DIREITA.
+ */
 // Envia uma jogada de movimento do PacMan ao servidor.
 static int envia_movimento_pacman(int soquete, uint8_t tipo_movimento)
 {
@@ -108,6 +117,10 @@ static int envia_movimento_pacman(int soquete, uint8_t tipo_movimento)
         &proxima_sequencia_cliente);
 }
 
+/* APAGAR
+ * Recebe os fragmentos de visualizacao enviados pelo servidor, confirma cada
+ * pacote com ACK e imprime o mapa remontado ao final da transmissao.
+ */
 // Recebe a visualizacao enviada pelo servidor e imprime o mapa completo.
 static int recebe_mapa_completo(int soquete)
 {
@@ -229,6 +242,11 @@ static int recebe_mapa_completo(int soquete)
                          FUNÇÕES PRINCIPAIS
 ======================================================================*/
 
+/*
+ * Executa o modo cliente.
+ * Decide se o argumento representa envio de arquivo, pedido de mapa,
+ * movimento do PacMan ou mensagem comum, e usa o protocolo adequado.
+ */
 int executa_cliente(int soquete, const char *mensagem)
 {
     uint8_t tipo_movimento;
@@ -240,7 +258,7 @@ int executa_cliente(int soquete, const char *mensagem)
         return -1;
     }
 
-    /*
+    /* APAGAR
      * Teste temporario:
      * se o argumento comecar com "arquivo:", envia o arquivo informado.
      *
@@ -265,7 +283,7 @@ int executa_cliente(int soquete, const char *mensagem)
             &proxima_sequencia_cliente);
     }
 
-    /*
+    /* APAGAR
      * Pedido temporario de jogo:
      * envia MSG_INICIALIZACAO e aguarda o servidor responder com o mapa completo.
      */

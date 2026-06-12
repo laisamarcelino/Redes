@@ -137,6 +137,11 @@ static void sorteia_posicao_entidades(void)
     }
 }
 
+/*
+ * Procura uma pastilha ativa em uma coordenada do mapa.
+ * Retorna o indice da pastilha no vetor do jogo ou -1 quando a casa nao
+ * possui pastilha ativa.
+ */
 // Retorna o indice da pastilha ativa em uma posicao ou -1 se nao houver.
 static int pastilha_na_posicao(const jogo_t *jogo, int x, int y)
 {
@@ -152,6 +157,10 @@ static int pastilha_na_posicao(const jogo_t *jogo, int x, int y)
     return -1;
 }
 
+/*
+ * Verifica se qualquer fantasma ativo esta em uma coordenada.
+ * Usado para detectar colisao depois que o PacMan se move.
+ */
 // Verifica se algum fantasma ativo ocupa a posicao informada.
 static int fantasma_na_posicao(const jogo_t *jogo, int x, int y)
 {
