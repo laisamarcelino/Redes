@@ -13,6 +13,7 @@
 static void mostra_uso(const char *programa) {
     fprintf(stderr, "Uso:\n");
     fprintf(stderr, "  %s -s [-l] [-i interface]\n", programa);
+    fprintf(stderr, "  %s -c mapa [-l] [-i interface]\n", programa);
     fprintf(stderr, "  %s -c \"mensagem\" [-l] [-i interface]\n", programa);
     fprintf(stderr, "  %s -c \"arquivo:caminho/do/arquivo.txt\" [-l] [-i interface]\n", programa);
     fprintf(stderr, "\nOpcoes:\n");

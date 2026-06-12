@@ -5,6 +5,7 @@
 #include "protocol.h"
 #include "files.h"
 #include "transmission.h"
+#include "game.h"
 
 #include <errno.h>
 #include <stdlib.h>
@@ -15,6 +16,8 @@
                          FUNÇÕES AUXILIARES
 ======================================================================*/
 uint8_t sequencia_esperada = 0;
+
+#define CAMINHO_MAPA_PADRAO "maps/padrao_ufpr.csv"
 
 // Retorna verdadeiro quando o tipo recebido representa um bloco de arquivo.
 static int tipo_arquivo(uint8_t tipo_msg)
@@ -230,6 +233,81 @@ static int salva_arquivo_completo(uint8_t tipo_msg, const uint8_t *buffer, size_
     return 0;
 }
 
+// Envia um buffer grande ao cliente, fragmentando em mensagens do protocolo.
+static int envia_buffer_protocolado_servidor(
+    int soquete,
+    uint8_t tipo_msg,
+    const uint8_t *buffer,
+    size_t tamanho_buffer)
+{
+    size_t offset = 0;
+    uint8_t proxima_sequencia = 0;
+
+    if (buffer == NULL && tamanho_buffer > 0)
+    {
+        fprintf(stderr, "[ERRO] Buffer nulo com tamanho maior que zero\n");
+        return -1;
+    }
+
+    while (offset < tamanho_buffer)
+    {
+        mensagem_t mensagem;
+        size_t bytes_restantes = tamanho_buffer - offset;
+        uint8_t tamanho_bloco = bytes_restantes > TAMANHO_MAX_DADOS
+                                    ? TAMANHO_MAX_DADOS
+                                    : (uint8_t)bytes_restantes;
+
+        memset(&mensagem, 0, sizeof(mensagem));
+        mensagem.tipo_msg = tipo_msg;
+        mensagem.tamanho_dados = tamanho_bloco;
+
+        memcpy(mensagem.dados, buffer + offset, tamanho_bloco);
+
+        if (envia_pacote_com_reenvio(
+                soquete,
+                &mensagem,
+                &proxima_sequencia) != 0)
+        {
+            fprintf(stderr, "[ERRO] Falha ao enviar visualizacao do mapa\n");
+            return -1;
+        }
+
+        offset += tamanho_bloco;
+    }
+
+    mensagem_t fim;
+    memset(&fim, 0, sizeof(fim));
+    fim.tipo_msg = MSG_FIM_TRANSMISSAO;
+    fim.tamanho_dados = 0;
+
+    return envia_pacote_com_reenvio(
+        soquete,
+        &fim,
+        &proxima_sequencia);
+}
+
+// Gera a visualizacao atual do jogo e envia o mapa completo ao cliente.
+static int envia_mapa_completo(int soquete, const jogo_t *jogo)
+{
+    char visualizacao[JOGO_VISUALIZACAO_MAX];
+    size_t tamanho_visualizacao = 0;
+
+    if (gera_visualizacao(
+            jogo,
+            visualizacao,
+            sizeof(visualizacao),
+            &tamanho_visualizacao) != 0)
+    {
+        return -1;
+    }
+
+    return envia_buffer_protocolado_servidor(
+        soquete,
+        MSG_VISUALIZACAO,
+        (const uint8_t *)visualizacao,
+        tamanho_visualizacao);
+}
+
 /* ===================================================================
                          FUNÇÕES PRINCIPAIS
 ======================================================================*/
@@ -245,6 +323,17 @@ int executa_servidor(int soquete)
     size_t capacidade_recebido = 0;
     uint8_t sequencia_esperada = 0;
     uint8_t tipo_transmissao_atual = MSG_DADOS;
+    jogo_t jogo;
+
+    if (carrega_mapa_csv(&jogo, CAMINHO_MAPA_PADRAO) != 0)
+    {
+        return -1;
+    }
+
+    if (posiciona_entidades_no_mapa(&jogo) != 0)
+    {
+        return -1;
+    }
 
     printf("Servidor aguardando pacotes do protocolo PacMan...\n");
 
@@ -378,6 +467,31 @@ int executa_servidor(int soquete)
                 soquete,
                 MSG_ACK,
                 mensagem.num_sequencia_msg);
+
+            continue;
+        }
+
+        if (mensagem.tipo_msg == MSG_INICIALIZACAO)
+        {
+            sequencia_esperada = calcula_proxima_sequencia(sequencia_esperada);
+
+            envia_ack_nack(
+                soquete,
+                MSG_ACK,
+                mensagem.num_sequencia_msg);
+
+            if (envia_mapa_completo(soquete, &jogo) != 0)
+            {
+                free(buffer_recebido);
+                return -1;
+            }
+
+            /*
+             * O cliente atual inicia a sequencia em 0 a cada execucao.
+             * Depois de responder ao pedido do mapa, o servidor aceita um
+             * novo pedido independente tambem a partir da sequencia 0.
+             */
+            sequencia_esperada = 0;
 
             continue;
         }

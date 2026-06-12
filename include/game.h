@@ -38,7 +38,7 @@ typedef enum {
     JOGO_DERROTA = 2
 } jogo_resultado_t;
 
-/* Representa um personagem */
+/* Representa uma entidade (pacman, fantasma ou pastilha) */
 typedef struct {
     int posicao_x;
     int posicao_y;
@@ -46,22 +46,24 @@ typedef struct {
     char simbolo;
 
     int direcao;
-} personagem_t;
+} entidade_t;
 
 /*
  * Estado completo de uma partida.
  * O mapa guarda paredes, vazios e pastilhas; PacMan e fantasmas ficam
- * nas estruturas de personagem para facilitar movimentacao.
+ * nas estruturas de entidade para facilitar movimentacao.
  */
 typedef struct {
     char mapa[LINHAS][COLUNAS];
 
-    personagem_t pacman;
+    entidade_t pacman;
 
-    personagem_t fantasma_vermelho;
-    personagem_t fantasma_azul;
-    personagem_t fantasma_verde;
-    personagem_t fantasma_amarelo;
+    entidade_t fantasma_vermelho;
+    entidade_t fantasma_azul;
+    entidade_t fantasma_verde;
+    entidade_t fantasma_amarelo;
+
+    entidade_t pastilhas[TOTAL_PASTILHAS];
 
     int rodada;
     int raio_visao;
@@ -77,15 +79,22 @@ typedef struct {
 void inicializa_jogo(jogo_t *jogo);
 
 /*
- * Carrega um mapa 40x40 de um CSV separado por ';'.
- * Aceita os simbolos definidos em representacao_labirinto_t.
+ * Carrega um mapa 40x40 de um CSV
+ * Aceita os simbolos definidos em representacao_labirinto_t
  */
 int carrega_mapa_csv(jogo_t *jogo, const char *caminho_csv);
 
 /*
- * Sorteia uma celula vazia, dentro dos limites do mapa e sem personagem.
- * Retorna 0 em caso de sucesso e -1 se nao houver posicao disponivel.
+ * Sorteia uma celula vazia, dentro dos limites do mapa e sem entidade
+ * Retorna 0 em caso de sucesso e -1 se nao houver posicao disponivel
  */
 int sorteia_posicao(const jogo_t *jogo, int *x, int *y);
+
+// Sorteia e posiciona as entidades iniciais no mapa do jogo
+int posiciona_uma_entidade(jogo_t *jogo, entidade_t *entidade);
+int posiciona_entidades_no_mapa(jogo_t *jogo);
+
+// Gera uma visualizacao textual completa do mapa atual do jogo.
+int gera_visualizacao(const jogo_t *jogo, char *saida, size_t capacidade, size_t *tamanho_saida);
 
 #endif

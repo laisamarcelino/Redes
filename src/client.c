@@ -105,6 +105,175 @@ static int envia_buffer_protocolado(
     return 0;
 }
 
+// Acrescenta um fragmento recebido ao buffer remontado.
+static int acumula_fragmento(uint8_t **buffer, size_t *tamanho_atual,
+                             size_t *capacidade, const uint8_t *dados,
+                             size_t tamanho_dados)
+{
+    if (tamanho_dados == 0)
+    {
+        return 0;
+    }
+
+    if (*tamanho_atual + tamanho_dados + 1 > *capacidade)
+    {
+        size_t nova_capacidade = (*capacidade == 0) ? 256 : *capacidade;
+
+        while (*tamanho_atual + tamanho_dados + 1 > nova_capacidade)
+        {
+            nova_capacidade *= 2;
+        }
+
+        uint8_t *novo_buffer = realloc(*buffer, nova_capacidade);
+        if (novo_buffer == NULL)
+        {
+            fprintf(stderr, "[ERRO] Falha ao realocar visualizacao recebida\n");
+            return -1;
+        }
+
+        *buffer = novo_buffer;
+        *capacidade = nova_capacidade;
+    }
+
+    memcpy(*buffer + *tamanho_atual, dados, tamanho_dados);
+    *tamanho_atual += tamanho_dados;
+    (*buffer)[*tamanho_atual] = '\0';
+
+    return 0;
+}
+
+// Envia ao servidor um pedido simples para iniciar/consultar o mapa do jogo.
+static int envia_pedido_mapa(int soquete)
+{
+    mensagem_t mensagem;
+
+    memset(&mensagem, 0, sizeof(mensagem));
+    mensagem.tipo_msg = MSG_INICIALIZACAO;
+    mensagem.tamanho_dados = 0;
+
+    return envia_pacote_com_reenvio(
+        soquete,
+        &mensagem,
+        &proxima_sequencia_cliente);
+}
+
+// Recebe a visualizacao enviada pelo servidor e imprime o mapa completo.
+static int recebe_mapa_completo(int soquete)
+{
+    uint8_t pacote[TAMANHO_MAX_PACOTE];
+    mensagem_t mensagem;
+    uint8_t *visualizacao = NULL;
+    size_t tamanho_visualizacao = 0;
+    size_t capacidade_visualizacao = 0;
+    uint8_t sequencia_esperada = 0;
+
+    while (1)
+    {
+        ssize_t recebido = espera_mensagem_servidor(
+            soquete,
+            pacote,
+            sizeof(pacote));
+
+        if (recebido < 0)
+        {
+            if (errno == EINTR)
+            {
+                continue;
+            }
+
+            perror("espera_mensagem_servidor");
+            free(visualizacao);
+            return -1;
+        }
+
+        if (recebido == 0)
+        {
+            continue;
+        }
+
+        if (desmonta_pacote(pacote, (size_t)recebido, &mensagem) != 0)
+        {
+            fprintf(stderr, "[ERRO] Pacote invalido recebido pelo cliente\n");
+
+            if (recebido >= TAMANHO_CABECALHO_PROTOCOLO &&
+                pacote[0] == MARCADOR_INICIO)
+            {
+                envia_ack_nack(
+                    soquete,
+                    MSG_NACK,
+                    extrai_sequencia_pacote_bruto(pacote));
+            }
+
+            continue;
+        }
+
+        if (mensagem.num_sequencia_msg ==
+            calcula_sequencia_anterior(sequencia_esperada))
+        {
+            envia_ack_nack(
+                soquete,
+                MSG_ACK,
+                mensagem.num_sequencia_msg);
+            continue;
+        }
+
+        if (mensagem.num_sequencia_msg != sequencia_esperada)
+        {
+            envia_ack_nack(
+                soquete,
+                MSG_NACK,
+                mensagem.num_sequencia_msg);
+            continue;
+        }
+
+        if (mensagem.tipo_msg == MSG_VISUALIZACAO)
+        {
+            if (acumula_fragmento(
+                    &visualizacao,
+                    &tamanho_visualizacao,
+                    &capacidade_visualizacao,
+                    mensagem.dados,
+                    mensagem.tamanho_dados) != 0)
+            {
+                free(visualizacao);
+                return -1;
+            }
+
+            sequencia_esperada = calcula_proxima_sequencia(sequencia_esperada);
+
+            envia_ack_nack(
+                soquete,
+                MSG_ACK,
+                mensagem.num_sequencia_msg);
+
+            continue;
+        }
+
+        if (mensagem.tipo_msg == MSG_FIM_TRANSMISSAO)
+        {
+            envia_ack_nack(
+                soquete,
+                MSG_ACK,
+                mensagem.num_sequencia_msg);
+
+            if (visualizacao != NULL)
+            {
+                printf("%s", visualizacao);
+            }
+
+            free(visualizacao);
+            return 0;
+        }
+
+        fprintf(stderr, "[ERRO] Tipo inesperado ao receber mapa: %u\n",
+                mensagem.tipo_msg);
+        envia_ack_nack(
+            soquete,
+            MSG_NACK,
+            mensagem.num_sequencia_msg);
+    }
+}
+
 /* ===================================================================
                          FUNÇÕES PRINCIPAIS
 ======================================================================*/
@@ -141,6 +310,20 @@ int executa_cliente(int soquete, const char *mensagem)
             caminho,
             tipo,
             &proxima_sequencia_cliente);
+    }
+
+    /*
+     * Pedido temporario de jogo:
+     * envia MSG_INICIALIZACAO e aguarda o servidor responder com o mapa completo.
+     */
+    if (strcmp(mensagem, "mapa") == 0 || strcmp(mensagem, "iniciar") == 0)
+    {
+        if (envia_pedido_mapa(soquete) != 0)
+        {
+            return -1;
+        }
+
+        return recebe_mapa_completo(soquete);
     }
 
     // Envia a mensagem em blocos, trata ACK, NACK e timeout.

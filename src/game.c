@@ -20,26 +20,18 @@
                          FUNCOES AUXILIARES
 ======================================================================*/
 
-/* Confere se um caractere pertence ao conjunto de simbolos do labirinto. */
+/*
+ * Verifica se um simbolo lido do CSV pode ser usado na matriz do mapa.
+ * Retorna SUCESSO para parede ou espaco vazio, e ERRO para qualquer outro
+ * caractere.
+ */
 static int eh_representacao_valida(char simbolo)
 {
+    /* O arquivo CSV descreve apenas a estrutura fixa do mapa. */
     switch (simbolo)
     {
-    case LAB_PACMAN:
     case LAB_PAREDE:
     case LAB_VAZIO:
-
-    case LAB_FANTASMA_VERMELHO:
-    case LAB_FANTASMA_AZUL:
-    case LAB_FANTASMA_VERDE:
-    case LAB_FANTASMA_AMARELO:
-
-    case LAB_PASTILHA_TXT_1:
-    case LAB_PASTILHA_TXT_2:
-    case LAB_PASTILHA_JPG_3:
-    case LAB_PASTILHA_JPG_4:
-    case LAB_PASTILHA_MP4_5:
-    case LAB_PASTILHA_MP4_6:
         return SUCESSO;
 
     default:
@@ -47,71 +39,97 @@ static int eh_representacao_valida(char simbolo)
     }
 }
 
-// Inicializa a struct do personagem
-static void inicializa_personagem(personagem_t *personagem, char simbolo)
+/*
+ * Inicializa uma entidade do jogo com o simbolo informado.
+ * A entidade comeca inativa e sem posicao valida ate ser posicionada no mapa.
+ */
+static void inicializa_entidade(entidade_t *entidade, char simbolo)
 {
-    if (personagem == NULL)
+    if (entidade == NULL)
         return;
 
-    personagem->posicao_x = -1;
-    personagem->posicao_y = -1;
-    personagem->ativo = 0;
-    personagem->simbolo = simbolo;
-    personagem->direcao = DIRECAO_CIMA;
+    /* Posicao -1 indica que a entidade ainda nao foi colocada no mapa. */
+    entidade->posicao_x = -1;
+    entidade->posicao_y = -1;
+    entidade->ativo = 0;
+    entidade->simbolo = simbolo;
+    entidade->direcao = -1;
 }
 
-// Verifica se uma posição do mapa é valida
+/*
+ * Verifica se as coordenadas recebidas estao dentro dos limites da matriz
+ * do labirinto.
+ */
 static int posicao_valida(int x, int y)
 {
     return x >= 0 && x < LINHAS && y >= 0 && y < COLUNAS;
 }
 
-// Verifica se um dado personagem ocupa uma posição dada
-static int personagem_ocupa_posicao(const personagem_t *personagem, int x, int y)
+/*
+ * Verifica se uma entidade ativa ocupa exatamente a posicao informada.
+ * Entidades nulas ou inativas nunca contam como ocupantes.
+ */
+static int entidade_ocupa_posicao(const entidade_t *entidade, int x, int y)
 {
-    if (personagem == NULL)
+    if (entidade == NULL)
         return 0;
 
-    if (!personagem->ativo)
+    if (!entidade->ativo)
         return 0;
 
-    return personagem->posicao_x == x && personagem->posicao_y == y;
+    return entidade->posicao_x == x && entidade->posicao_y == y;
 }
 
-// Retorna se uma posição esta ocupada ou não
+/*
+ * Verifica se uma casa pode receber uma nova entidade.
+ * A casa precisa estar dentro do mapa, ser vazia e nao conter PacMan,
+ * fantasmas ou pastilhas ativas.
+ */
 static int posicao_livre(const jogo_t *jogo, int x, int y)
 {
     if (jogo == NULL)
         return 0;
 
+    /* A posicao precisa existir, ser vazia no mapa e nao conter entidades. */
     if (!posicao_valida(x, y))
         return 0;
 
     if (jogo->mapa[x][y] != LAB_VAZIO)
         return 0;
 
-    if (personagem_ocupa_posicao(&jogo->pacman, x, y))
+    if (entidade_ocupa_posicao(&jogo->pacman, x, y))
         return 0;
 
-    if (personagem_ocupa_posicao(&jogo->fantasma_vermelho, x, y))
+    if (entidade_ocupa_posicao(&jogo->fantasma_vermelho, x, y))
         return 0;
 
-    if (personagem_ocupa_posicao(&jogo->fantasma_azul, x, y))
+    if (entidade_ocupa_posicao(&jogo->fantasma_azul, x, y))
         return 0;
 
-    if (personagem_ocupa_posicao(&jogo->fantasma_verde, x, y))
+    if (entidade_ocupa_posicao(&jogo->fantasma_verde, x, y))
         return 0;
 
-    if (personagem_ocupa_posicao(&jogo->fantasma_amarelo, x, y))
+    if (entidade_ocupa_posicao(&jogo->fantasma_amarelo, x, y))
         return 0;
+
+    for (int i = 0; i < TOTAL_PASTILHAS; i++)
+    {
+        if (entidade_ocupa_posicao(&jogo->pastilhas[i], x, y))
+            return 0;
+    }
 
     return 1;
 }
 
-static void sorteia_posicao_personagens(void)
+/*
+ * Prepara o gerador de numeros aleatorios usado no sorteio das posicoes.
+ * A semente e configurada somente na primeira chamada.
+ */
+static void sorteia_posicao_entidades(void)
 {
     static int inicializado = 0;
 
+    /* Inicializa o gerador pseudoaleatorio apenas uma vez por execucao. */
     if (!inicializado)
     {
         srand((unsigned int)time(NULL));
@@ -119,15 +137,23 @@ static void sorteia_posicao_personagens(void)
     }
 }
 
+
+
 /* ===================================================================
                          FUNCOES PRINCIPAIS
 ======================================================================*/
 
+/*
+ * Reinicia o estado completo do jogo.
+ * O mapa fica vazio, todas as entidades ficam inativas e os contadores da
+ * partida voltam para os valores iniciais.
+ */
 void inicializa_jogo(jogo_t *jogo)
 {
     if (jogo == NULL)
         return;
 
+    /* Comeca com um mapa completamente vazio; o CSV pode sobrescrever depois. */
     for (int x = 0; x < LINHAS; x++)
     {
         for (int y = 0; y < COLUNAS; y++)
@@ -136,13 +162,21 @@ void inicializa_jogo(jogo_t *jogo)
         }
     }
 
-    inicializa_personagem(&jogo->pacman, LAB_PACMAN);
+    inicializa_entidade(&jogo->pacman, LAB_PACMAN);
 
-    inicializa_personagem(&jogo->fantasma_vermelho, LAB_FANTASMA_VERMELHO);
-    inicializa_personagem(&jogo->fantasma_azul, LAB_FANTASMA_AZUL);
-    inicializa_personagem(&jogo->fantasma_verde, LAB_FANTASMA_VERDE);
-    inicializa_personagem(&jogo->fantasma_amarelo, LAB_FANTASMA_AMARELO);
+    inicializa_entidade(&jogo->fantasma_vermelho, LAB_FANTASMA_VERMELHO);
+    inicializa_entidade(&jogo->fantasma_azul, LAB_FANTASMA_AZUL);
+    inicializa_entidade(&jogo->fantasma_verde, LAB_FANTASMA_VERDE);
+    inicializa_entidade(&jogo->fantasma_amarelo, LAB_FANTASMA_AMARELO);
 
+    inicializa_entidade(&jogo->pastilhas[0], LAB_PASTILHA_TXT_1);
+    inicializa_entidade(&jogo->pastilhas[1], LAB_PASTILHA_TXT_2);
+    inicializa_entidade(&jogo->pastilhas[2], LAB_PASTILHA_JPG_3);
+    inicializa_entidade(&jogo->pastilhas[3], LAB_PASTILHA_JPG_4);
+    inicializa_entidade(&jogo->pastilhas[4], LAB_PASTILHA_MP4_5);
+    inicializa_entidade(&jogo->pastilhas[5], LAB_PASTILHA_MP4_6);
+
+    /* Estado inicial da partida antes de qualquer rodada ser processada. */
     jogo->rodada = 0;
     jogo->raio_visao = RAIO_INICIAL;
     jogo->pastilhas_coletadas = 0;
@@ -152,6 +186,11 @@ void inicializa_jogo(jogo_t *jogo)
     jogo->venceu = 0;
 }
 
+/*
+ * Carrega o labirinto a partir de um arquivo CSV 40x40.
+ * Cada celula deve conter um simbolo valido de mapa; em caso de erro,
+ * a funcao imprime uma mensagem e retorna ERRO.
+ */
 int carrega_mapa_csv(jogo_t *jogo, const char *caminho_csv)
 {
     FILE *arquivo;
@@ -173,6 +212,7 @@ int carrega_mapa_csv(jogo_t *jogo, const char *caminho_csv)
 
     inicializa_jogo(jogo);
 
+    /* Cada linha do CSV representa uma linha do labirinto 40x40. */
     for (int x = 0; x < LINHAS; x++)
     {
         char *token;
@@ -189,6 +229,7 @@ int carrega_mapa_csv(jogo_t *jogo, const char *caminho_csv)
 
         token = strtok(linha_csv, ";\r\n");
 
+        /* As colunas sao separadas por ponto e virgula. */
         for (int y = 0; y < COLUNAS; y++)
         {
             char simbolo;
@@ -205,6 +246,7 @@ int carrega_mapa_csv(jogo_t *jogo, const char *caminho_csv)
 
             simbolo = token[0];
 
+            /* Nesta etapa sao aceitos somente parede e espaco vazio. */
             if (eh_representacao_valida(simbolo) != SUCESSO)
             {
                 fprintf(stderr,
@@ -227,6 +269,11 @@ int carrega_mapa_csv(jogo_t *jogo, const char *caminho_csv)
     return SUCESSO;
 }
 
+/*
+ * Sorteia uma posicao livre do mapa e devolve as coordenadas por ponteiro.
+ * O sorteio considera apenas casas vazias que nao estejam ocupadas por
+ * nenhuma entidade ativa.
+ */
 int sorteia_posicao(const jogo_t *jogo, int *x, int *y)
 {
     int total_livres = 0;
@@ -239,8 +286,9 @@ int sorteia_posicao(const jogo_t *jogo, int *x, int *y)
         return ERRO;
     }
 
-    sorteia_posicao_personagens();
+    sorteia_posicao_entidades();
 
+    /* Primeiro conta as casas candidatas para sortear uma delas de forma uniforme. */
     for (int i = 0; i < LINHAS; i++)
     {
         for (int j = 0; j < COLUNAS; j++)
@@ -258,6 +306,7 @@ int sorteia_posicao(const jogo_t *jogo, int *x, int *y)
 
     alvo = rand() % total_livres;
 
+    /* Depois percorre novamente ate encontrar a casa correspondente ao sorteio. */
     for (int i = 0; i < LINHAS; i++)
     {
         for (int j = 0; j < COLUNAS; j++)
@@ -277,4 +326,152 @@ int sorteia_posicao(const jogo_t *jogo, int *x, int *y)
     }
 
     return ERRO;
+}
+
+/*
+ * Sorteia uma posicao aleatoria livre e coloca a entidade nessa casa.
+ * Antes do sorteio, a entidade e desativada para nao bloquear a propria
+ * posicao antiga caso esteja sendo reposicionada.
+ */
+int posiciona_uma_entidade(jogo_t *jogo, entidade_t *entidade)
+{
+    int x;
+    int y;
+
+    if (jogo == NULL || entidade == NULL)
+    {
+        fprintf(stderr, "[ERRO] Parametro invalido em posiciona_uma_entidade.\n");
+        return ERRO;
+    }
+
+    /*
+     * Garante que, caso a funcao seja chamada novamente,
+     * a propria entidade nao bloqueie sua posicao antiga.
+     */
+    entidade->ativo = 0;
+    entidade->posicao_x = -1;
+    entidade->posicao_y = -1;
+
+    if (sorteia_posicao(jogo, &x, &y) != SUCESSO)
+    {
+        fprintf(stderr,
+                "[ERRO] Nao foi possivel sortear posicao para entidade '%c'.\n",
+                entidade->simbolo);
+        return ERRO;
+    }
+
+    entidade->posicao_x = x;
+    entidade->posicao_y = y;
+    /* A entidade so passa a bloquear a posicao depois de receber coordenadas validas. */
+    entidade->ativo = 1;
+
+    return SUCESSO;
+}
+
+/*
+ * Posiciona todas as entidades iniciais da partida.
+ * A funcao coloca PacMan, fantasmas e pastilhas em casas livres, sem
+ * sobreposicao, e define a direcao inicial dos fantasmas.
+ */
+int posiciona_entidades_no_mapa(jogo_t *jogo)
+{
+    if (jogo == NULL)
+    {
+        fprintf(stderr, "[ERRO] Parametro invalido em posiciona_entidades_iniciais.\n");
+        return ERRO;
+    }
+
+    /* Posiciona primeiro os personagens e depois as pastilhas para evitar sobreposicao. */
+    if (posiciona_uma_entidade(jogo, &jogo->pacman) != SUCESSO)
+        return ERRO;
+
+    if (posiciona_uma_entidade(jogo, &jogo->fantasma_vermelho) != SUCESSO)
+        return ERRO;
+
+    if (posiciona_uma_entidade(jogo, &jogo->fantasma_azul) != SUCESSO)
+        return ERRO;
+
+    if (posiciona_uma_entidade(jogo, &jogo->fantasma_verde) != SUCESSO)
+        return ERRO;
+
+    if (posiciona_uma_entidade(jogo, &jogo->fantasma_amarelo) != SUCESSO)
+        return ERRO;
+
+    for (int i = 0; i < TOTAL_PASTILHAS; i++)
+    {
+        if (posiciona_uma_entidade(jogo, &jogo->pastilhas[i]) != SUCESSO)
+            return ERRO;
+    }
+
+    /*
+     * Direcoes iniciais dos fantasmas.
+     * Pode mudar depois conforme a regra de cada fantasma.
+     */
+    jogo->fantasma_vermelho.direcao = DIRECAO_CIMA;
+    jogo->fantasma_azul.direcao = DIRECAO_CIMA;
+    jogo->fantasma_verde.direcao = DIRECAO_CIMA;
+    jogo->fantasma_amarelo.direcao = DIRECAO_CIMA;
+
+    return SUCESSO;
+}
+
+/*
+ * Gera uma representacao textual completa do mapa atual.
+ * O mapa base vem de jogo->mapa, mas entidades ativas aparecem por cima das
+ * casas vazias para que o cliente veja as posicoes sorteadas.
+ */
+int gera_visualizacao(const jogo_t *jogo, char *saida, size_t capacidade, size_t *tamanho_saida)
+{
+    size_t usado = 0;
+
+    if (jogo == NULL || saida == NULL || tamanho_saida == NULL)
+    {
+        fprintf(stderr, "[ERRO] Parametro invalido em gera_visualizacao.\n");
+        return ERRO;
+    }
+
+    if (capacidade < (LINHAS * (COLUNAS + 1)) + 1)
+    {
+        fprintf(stderr, "[ERRO] Buffer pequeno demais para visualizacao do mapa.\n");
+        return ERRO;
+    }
+
+    for (int x = 0; x < LINHAS; x++)
+    {
+        for (int y = 0; y < COLUNAS; y++)
+        {
+            char simbolo = jogo->mapa[x][y];
+
+            if (entidade_ocupa_posicao(&jogo->pacman, x, y))
+                simbolo = jogo->pacman.simbolo;
+            else if (entidade_ocupa_posicao(&jogo->fantasma_vermelho, x, y))
+                simbolo = jogo->fantasma_vermelho.simbolo;
+            else if (entidade_ocupa_posicao(&jogo->fantasma_azul, x, y))
+                simbolo = jogo->fantasma_azul.simbolo;
+            else if (entidade_ocupa_posicao(&jogo->fantasma_verde, x, y))
+                simbolo = jogo->fantasma_verde.simbolo;
+            else if (entidade_ocupa_posicao(&jogo->fantasma_amarelo, x, y))
+                simbolo = jogo->fantasma_amarelo.simbolo;
+            else
+            {
+                for (int i = 0; i < TOTAL_PASTILHAS; i++)
+                {
+                    if (entidade_ocupa_posicao(&jogo->pastilhas[i], x, y))
+                    {
+                        simbolo = jogo->pastilhas[i].simbolo;
+                        break;
+                    }
+                }
+            }
+
+            saida[usado++] = simbolo;
+        }
+
+        saida[usado++] = '\n';
+    }
+
+    saida[usado] = '\0';
+    *tamanho_saida = usado;
+
+    return SUCESSO;
 }
