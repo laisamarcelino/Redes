@@ -287,6 +287,82 @@ int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem, uint8_t *proxima
     return ERRO;
 }
 
+// Envia mensagens grandes, separando-as em blocos do tamanho maximo do protocolo.
+int envia_buffer_protocolado(int soquete, uint8_t tipo_msg, const uint8_t *buffer,
+                             size_t tamanho_buffer, uint8_t *proxima_sequencia)
+{
+    size_t offset = 0;
+
+    if (buffer == NULL && tamanho_buffer > 0)
+    {
+        fprintf(stderr, "[ERRO] Buffer nulo com tamanho maior que zero\n");
+        return ERRO;
+    }
+
+    if (proxima_sequencia == NULL)
+    {
+        fprintf(stderr, "[ERRO] Sequencia nula em envia_buffer_protocolado\n");
+        return ERRO;
+    }
+
+    while (offset < tamanho_buffer)
+    {
+        mensagem_t mensagem;
+        size_t bytes_restantes = tamanho_buffer - offset;
+        uint8_t tamanho_bloco;
+
+        memset(&mensagem, 0, sizeof(mensagem));
+
+        if (bytes_restantes > TAMANHO_MAX_DADOS)
+        {
+            tamanho_bloco = TAMANHO_MAX_DADOS;
+        }
+        else
+        {
+            tamanho_bloco = (uint8_t)bytes_restantes;
+        }
+
+        mensagem.tipo_msg = tipo_msg;
+        mensagem.tamanho_dados = tamanho_bloco;
+
+        memcpy(
+            mensagem.dados,
+            buffer + offset,
+            tamanho_bloco);
+
+        if (envia_pacote_com_reenvio(
+                soquete,
+                &mensagem,
+                proxima_sequencia) != 0)
+        {
+            fprintf(stderr,
+                    "[ERRO] Falha ao enviar bloco no offset %zu\n",
+                    offset);
+            return ERRO;
+        }
+
+        offset += tamanho_bloco;
+    }
+
+    mensagem_t fim;
+    memset(&fim, 0, sizeof(fim));
+    fim.tipo_msg = MSG_FIM_TRANSMISSAO;
+    fim.tamanho_dados = 0;
+
+    if (envia_pacote_com_reenvio(
+            soquete,
+            &fim,
+            proxima_sequencia) != 0)
+    {
+        fprintf(stderr, "[ERRO] Falha ao enviar MSG_FIM_TRANSMISSAO\n");
+        return ERRO;
+    }
+
+    printf("[DEBUG] Transmissão em blocos finalizada\n");
+
+    return SUCESSO;
+}
+
 // Calcula a proxima sequencia respeitando o limite de 6 bits
 uint8_t calcula_proxima_sequencia(uint8_t sequencia)
 {

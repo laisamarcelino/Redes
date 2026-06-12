@@ -233,64 +233,12 @@ static int salva_arquivo_completo(uint8_t tipo_msg, const uint8_t *buffer, size_
     return 0;
 }
 
-// Envia um buffer grande ao cliente, fragmentando em mensagens do protocolo.
-static int envia_buffer_protocolado_servidor(
-    int soquete,
-    uint8_t tipo_msg,
-    const uint8_t *buffer,
-    size_t tamanho_buffer)
-{
-    size_t offset = 0;
-    uint8_t proxima_sequencia = 0;
-
-    if (buffer == NULL && tamanho_buffer > 0)
-    {
-        fprintf(stderr, "[ERRO] Buffer nulo com tamanho maior que zero\n");
-        return -1;
-    }
-
-    while (offset < tamanho_buffer)
-    {
-        mensagem_t mensagem;
-        size_t bytes_restantes = tamanho_buffer - offset;
-        uint8_t tamanho_bloco = bytes_restantes > TAMANHO_MAX_DADOS
-                                    ? TAMANHO_MAX_DADOS
-                                    : (uint8_t)bytes_restantes;
-
-        memset(&mensagem, 0, sizeof(mensagem));
-        mensagem.tipo_msg = tipo_msg;
-        mensagem.tamanho_dados = tamanho_bloco;
-
-        memcpy(mensagem.dados, buffer + offset, tamanho_bloco);
-
-        if (envia_pacote_com_reenvio(
-                soquete,
-                &mensagem,
-                &proxima_sequencia) != 0)
-        {
-            fprintf(stderr, "[ERRO] Falha ao enviar visualizacao do mapa\n");
-            return -1;
-        }
-
-        offset += tamanho_bloco;
-    }
-
-    mensagem_t fim;
-    memset(&fim, 0, sizeof(fim));
-    fim.tipo_msg = MSG_FIM_TRANSMISSAO;
-    fim.tamanho_dados = 0;
-
-    return envia_pacote_com_reenvio(
-        soquete,
-        &fim,
-        &proxima_sequencia);
-}
-
 // Gera a visualizacao atual do jogo e envia o mapa completo ao cliente.
 static int envia_mapa_completo(int soquete, const jogo_t *jogo)
 {
     char visualizacao[JOGO_VISUALIZACAO_MAX];
     size_t tamanho_visualizacao = 0;
+    uint8_t proxima_sequencia = 0;
 
     if (gera_visualizacao(
             jogo,
@@ -301,11 +249,12 @@ static int envia_mapa_completo(int soquete, const jogo_t *jogo)
         return -1;
     }
 
-    return envia_buffer_protocolado_servidor(
+    return envia_buffer_protocolado(
         soquete,
         MSG_VISUALIZACAO,
         (const uint8_t *)visualizacao,
-        tamanho_visualizacao);
+        tamanho_visualizacao,
+        &proxima_sequencia);
 }
 
 /* ===================================================================

@@ -18,6 +18,10 @@ int espera_ack_nack_com_timeout(int soquete, uint8_t sequencia_esperada);
 int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem,
                              uint8_t *proxima_sequencia);
 
+// Envia um buffer grande, fragmentando em pacotes do protocolo e finalizando a transmissao.
+int envia_buffer_protocolado(int soquete, uint8_t tipo_msg, const uint8_t *buffer,
+                             size_t tamanho_buffer, uint8_t *proxima_sequencia);
+
 // Calcula a proxima sequencia circular de 6 bits.
 uint8_t calcula_proxima_sequencia(uint8_t sequencia);
 

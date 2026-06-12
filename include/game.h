@@ -94,7 +94,7 @@ int sorteia_posicao(const jogo_t *jogo, int *x, int *y);
 int posiciona_uma_entidade(jogo_t *jogo, entidade_t *entidade);
 int posiciona_entidades_no_mapa(jogo_t *jogo);
 
-// Gera uma visualizacao textual completa do mapa atual do jogo.
+// Gera uma visualizacao completa do mapa atual do jogo.
 int gera_visualizacao(const jogo_t *jogo, char *saida, size_t capacidade, size_t *tamanho_saida);
 
 #endif
