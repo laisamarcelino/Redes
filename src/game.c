@@ -137,6 +137,33 @@ static void sorteia_posicao_entidades(void)
     }
 }
 
+// Retorna o indice da pastilha ativa em uma posicao ou -1 se nao houver.
+static int pastilha_na_posicao(const jogo_t *jogo, int x, int y)
+{
+    if (jogo == NULL)
+        return -1;
+
+    for (int i = 0; i < TOTAL_PASTILHAS; i++)
+    {
+        if (entidade_ocupa_posicao(&jogo->pastilhas[i], x, y))
+            return i;
+    }
+
+    return -1;
+}
+
+// Verifica se algum fantasma ativo ocupa a posicao informada.
+static int fantasma_na_posicao(const jogo_t *jogo, int x, int y)
+{
+    if (jogo == NULL)
+        return 0;
+
+    return entidade_ocupa_posicao(&jogo->fantasma_vermelho, x, y) ||
+           entidade_ocupa_posicao(&jogo->fantasma_azul, x, y) ||
+           entidade_ocupa_posicao(&jogo->fantasma_verde, x, y) ||
+           entidade_ocupa_posicao(&jogo->fantasma_amarelo, x, y);
+}
+
 
 
 /* ===================================================================
@@ -472,6 +499,74 @@ int gera_visualizacao(const jogo_t *jogo, char *saida, size_t capacidade, size_t
 
     saida[usado] = '\0';
     *tamanho_saida = usado;
+
+    return SUCESSO;
+}
+
+/*
+ * Move o PacMan uma casa na direcao indicada pelo deslocamento.
+ * Parede e fora do mapa bloqueiam o movimento; pastilhas sao coletadas ao
+ * entrar na casa; colisao com fantasma encerra o jogo como derrota.
+ */
+int movimenta_pacman(jogo_t *jogo, int deslocamento_x, int deslocamento_y)
+{
+    int novo_x;
+    int novo_y;
+    int indice_pastilha;
+
+    if (jogo == NULL)
+    {
+        fprintf(stderr, "[ERRO] Parametro invalido em movimenta_pacman.\n");
+        return ERRO;
+    }
+
+    if (!jogo->pacman.ativo)
+    {
+        fprintf(stderr, "[ERRO] PacMan nao esta ativo no mapa.\n");
+        return ERRO;
+    }
+
+    novo_x = jogo->pacman.posicao_x + deslocamento_x;
+    novo_y = jogo->pacman.posicao_y + deslocamento_y;
+
+    /*
+     * Movimento invalido nao muda a posicao, mas conta como rodada porque o
+     * cliente enviou uma jogada.
+     */
+    jogo->rodada++;
+
+    if (jogo->rodada % 5 == 0)
+    {
+        jogo->raio_visao++;
+    }
+
+    if (!posicao_valida(novo_x, novo_y) || jogo->mapa[novo_x][novo_y] == LAB_PAREDE)
+    {
+        return SUCESSO;
+    }
+
+    jogo->pacman.posicao_x = novo_x;
+    jogo->pacman.posicao_y = novo_y;
+
+    indice_pastilha = pastilha_na_posicao(jogo, novo_x, novo_y);
+    if (indice_pastilha >= 0)
+    {
+        jogo->ultima_pastilha_coletada = jogo->pastilhas[indice_pastilha].simbolo;
+        jogo->pastilhas[indice_pastilha].ativo = 0;
+        jogo->pastilhas_coletadas++;
+
+        if (jogo->pastilhas_coletadas >= TOTAL_PASTILHAS)
+        {
+            jogo->terminou = 1;
+            jogo->venceu = 1;
+        }
+    }
+
+    if (fantasma_na_posicao(jogo, novo_x, novo_y))
+    {
+        jogo->terminou = 1;
+        jogo->venceu = 0;
+    }
 
     return SUCESSO;
 }

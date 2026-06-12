@@ -17,6 +17,29 @@
 
 static uint8_t proxima_sequencia_cliente = 0;
 
+// Converte texto digitado pelo usuario para o tipo de movimento do protocolo.
+static uint8_t tipo_movimento_por_texto(const char *mensagem)
+{
+    if (mensagem == NULL)
+    {
+        return MSG_ERRO;
+    }
+
+    if (strcmp(mensagem, "cima") == 0 || strcmp(mensagem, "w") == 0)
+        return MSG_MOV_CIMA;
+
+    if (strcmp(mensagem, "baixo") == 0 || strcmp(mensagem, "s") == 0)
+        return MSG_MOV_BAIXO;
+
+    if (strcmp(mensagem, "esquerda") == 0 || strcmp(mensagem, "a") == 0)
+        return MSG_MOV_ESQUERDA;
+
+    if (strcmp(mensagem, "direita") == 0 || strcmp(mensagem, "d") == 0)
+        return MSG_MOV_DIREITA;
+
+    return MSG_ERRO;
+}
+
 // APAGAR - Entender isso aqui
 // Acrescenta um fragmento recebido ao buffer remontado.
 static int acumula_fragmento(uint8_t **buffer, size_t *tamanho_atual,
@@ -62,6 +85,21 @@ static int envia_pedido_mapa(int soquete)
 
     memset(&mensagem, 0, sizeof(mensagem));
     mensagem.tipo_msg = MSG_INICIALIZACAO;
+    mensagem.tamanho_dados = 0;
+
+    return envia_pacote_com_reenvio(
+        soquete,
+        &mensagem,
+        &proxima_sequencia_cliente);
+}
+
+// Envia uma jogada de movimento do PacMan ao servidor.
+static int envia_movimento_pacman(int soquete, uint8_t tipo_movimento)
+{
+    mensagem_t mensagem;
+
+    memset(&mensagem, 0, sizeof(mensagem));
+    mensagem.tipo_msg = tipo_movimento;
     mensagem.tamanho_dados = 0;
 
     return envia_pacote_com_reenvio(
@@ -193,6 +231,8 @@ static int recebe_mapa_completo(int soquete)
 
 int executa_cliente(int soquete, const char *mensagem)
 {
+    uint8_t tipo_movimento;
+
     // Valida a mensagem recebida pela linha de comando
     if (mensagem == NULL || mensagem[0] == '\0')
     {
@@ -232,6 +272,17 @@ int executa_cliente(int soquete, const char *mensagem)
     if (strcmp(mensagem, "mapa") == 0 || strcmp(mensagem, "iniciar") == 0)
     {
         if (envia_pedido_mapa(soquete) != 0)
+        {
+            return -1;
+        }
+
+        return recebe_mapa_completo(soquete);
+    }
+
+    tipo_movimento = tipo_movimento_por_texto(mensagem);
+    if (tipo_movimento != MSG_ERRO)
+    {
+        if (envia_movimento_pacman(soquete, tipo_movimento) != 0)
         {
             return -1;
         }

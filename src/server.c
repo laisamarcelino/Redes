@@ -25,6 +25,49 @@ static int tipo_arquivo(uint8_t tipo_msg)
     return tipo_msg == MSG_TXT || tipo_msg == MSG_JPG || tipo_msg == MSG_MP4;
 }
 
+// Retorna verdadeiro quando a mensagem representa um movimento do PacMan.
+static int tipo_movimento(uint8_t tipo_msg)
+{
+    return tipo_msg == MSG_MOV_CIMA ||
+           tipo_msg == MSG_MOV_BAIXO ||
+           tipo_msg == MSG_MOV_ESQUERDA ||
+           tipo_msg == MSG_MOV_DIREITA;
+}
+
+// Converte o tipo de movimento do protocolo para deslocamento na matriz.
+static int deslocamento_movimento(uint8_t tipo_msg, int *deslocamento_x, int *deslocamento_y)
+{
+    if (deslocamento_x == NULL || deslocamento_y == NULL)
+    {
+        return -1;
+    }
+
+    *deslocamento_x = 0;
+    *deslocamento_y = 0;
+
+    switch (tipo_msg)
+    {
+    case MSG_MOV_CIMA:
+        *deslocamento_x = -1;
+        return 0;
+
+    case MSG_MOV_BAIXO:
+        *deslocamento_x = 1;
+        return 0;
+
+    case MSG_MOV_ESQUERDA:
+        *deslocamento_y = -1;
+        return 0;
+
+    case MSG_MOV_DIREITA:
+        *deslocamento_y = 1;
+        return 0;
+
+    default:
+        return -1;
+    }
+}
+
 // Escolhe a extensao local usada pelo servidor para salvar o arquivo recebido.
 static const char *extensao_saida_arquivo(uint8_t tipo_msg)
 {
@@ -440,6 +483,39 @@ int executa_servidor(int soquete)
              * Depois de responder ao pedido do mapa, o servidor aceita um
              * novo pedido independente tambem a partir da sequencia 0.
              */
+            sequencia_esperada = 0;
+
+            continue;
+        }
+
+        if (tipo_movimento(mensagem.tipo_msg))
+        {
+            int deslocamento_x;
+            int deslocamento_y;
+
+            sequencia_esperada = calcula_proxima_sequencia(sequencia_esperada);
+
+            envia_ack_nack(
+                soquete,
+                MSG_ACK,
+                mensagem.num_sequencia_msg);
+
+            if (deslocamento_movimento(
+                    mensagem.tipo_msg,
+                    &deslocamento_x,
+                    &deslocamento_y) != 0 ||
+                movimenta_pacman(&jogo, deslocamento_x, deslocamento_y) != 0)
+            {
+                free(buffer_recebido);
+                return -1;
+            }
+
+            if (envia_mapa_completo(soquete, &jogo) != 0)
+            {
+                free(buffer_recebido);
+                return -1;
+            }
+
             sequencia_esperada = 0;
 
             continue;

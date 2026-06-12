@@ -97,4 +97,7 @@ int posiciona_entidades_no_mapa(jogo_t *jogo);
 // Gera uma visualizacao completa do mapa atual do jogo.
 int gera_visualizacao(const jogo_t *jogo, char *saida, size_t capacidade, size_t *tamanho_saida);
 
+// Move o PacMan por um deslocamento de uma casa e atualiza o estado da rodada.
+int movimenta_pacman(jogo_t *jogo, int deslocamento_x, int deslocamento_y);
+
 #endif
