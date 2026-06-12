@@ -101,6 +101,27 @@ static long long timestamp_ms(void)
     return ((long long)tp.tv_sec * 1000LL) + ((long long)tp.tv_usec / 1000LL);
 }
 
+// Remove o timeout de recebimento e devolve o socket ao modo bloqueante.
+static int limpa_timeout_recebimento(int soquete)
+{
+    struct timeval timeout;
+
+    memset(&timeout, 0, sizeof(timeout));
+
+    if (setsockopt(
+            soquete,
+            SOL_SOCKET,
+            SO_RCVTIMEO,
+            &timeout,
+            sizeof(timeout)) == -1)
+    {
+        perror("setsockopt(SO_RCVTIMEO reset)");
+        return -1;
+    }
+
+    return 0;
+}
+
 /* ===================================================================
                          FUNÇÕES PRINCIPAIS
 ======================================================================*/
@@ -476,6 +497,7 @@ ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
         // Encerra quando o limite total foi atingido
         if (decorrido >= timeout_ms)
         {
+            limpa_timeout_recebimento(soquete);
             return REDE_TIMEOUT;
         }
 
@@ -501,6 +523,7 @@ ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
                 sizeof(timeout)) == -1)
         {
             perror("setsockopt(SO_RCVTIMEO)");
+            limpa_timeout_recebimento(soquete);
             return -1;
         }
 
@@ -527,9 +550,11 @@ ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
 
             if (errno == EAGAIN || errno == EWOULDBLOCK)
             {
+                limpa_timeout_recebimento(soquete);
                 return REDE_TIMEOUT;
             }
 
+            limpa_timeout_recebimento(soquete);
             return -1;
         }
 
@@ -592,6 +617,7 @@ ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
         if (tamanho_pacote > tamanho_buffer)
         {
             errno = EMSGSIZE;
+            limpa_timeout_recebimento(soquete);
             return -1;
         }
 
@@ -599,6 +625,7 @@ ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
         memcpy(buffer, payload, tamanho_pacote);
 
         // Retorna o tamanho real do pacote PacMan
+        limpa_timeout_recebimento(soquete);
         return (ssize_t)tamanho_pacote;
     }
 }
