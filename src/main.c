@@ -35,7 +35,8 @@ int main(int argc, char **argv) {
 
     int opcao;
     /*
-     * * CORRECAO: adiciona -i para escolher a interface manualmente.
+     * APAGAR: adiciona -i para escolher a interface manualmente.
+     * Se quiser da pra tirar pois no meu PC ta indo automaticamente, e vamos apresentar neles
      * Isso evita selecionar Docker, bridge, VPN ou outra interface errada.
      */
     while ((opcao = getopt(argc, argv, "c:si:lh")) != -1) {

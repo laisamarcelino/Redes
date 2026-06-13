@@ -13,6 +13,7 @@
 #define SUCESSO 0
 #define ERRO -1
 
+// Retorna o tipo de mensagem correspondente a extensao do caminho informado
 uint8_t tipo_arquivo_por_caminho(const char *caminho)
 {
     const char *extensao;
@@ -47,6 +48,7 @@ uint8_t tipo_arquivo_por_caminho(const char *caminho)
     return MSG_ERRO;
 }
 
+// Envia um arquivo em blocos protocolados e finaliza a transmissao
 int envia_arquivo_protocolado(
     int soquete,
     const char *caminho_arquivo,
@@ -140,6 +142,7 @@ int envia_arquivo_protocolado(
     return SUCESSO;
 }
 
+// Recebe blocos protocolados e grava o conteudo no arquivo de saida
 int recebe_arquivo_protocolado(
     int soquete,
     const char *caminho_saida,

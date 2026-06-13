@@ -30,13 +30,13 @@
 #define ETH_P_PACMAN 0x88B5
 
 /*
- * Guarda dados da interface configurada.
- * envia_mensagem() usa essas informações para montar o quadro Ethernet.
+ * Guarda dados da interface configurada
+ * envia_mensagem() usa essas informações para montar o quadro Ethernet
  */
 static int g_ifindex = 0;
 static unsigned char g_mac_origem[ETH_ALEN];
 
-// Verifica se uma interface é wireless pelo padrão mais comum de nomes Linux.
+// Verifica se uma interface é wireless pelo padrão mais comum de nomes Linux
 static int eh_wireless(const char *nome_interface)
 {
     if (strncmp(nome_interface, "wlan", 4) == 0 ||
@@ -49,7 +49,7 @@ static int eh_wireless(const char *nome_interface)
     return 0;
 }
 
-// Verifica interfaces virtuais comuns que nao representam o cabo Ethernet.
+// Verifica interfaces virtuais comuns que nao representam o cabo Ethernet
 static int eh_virtual(const char *nome_interface)
 {
     if (strcmp(nome_interface, "docker0") == 0 ||
@@ -64,7 +64,7 @@ static int eh_virtual(const char *nome_interface)
     return 0;
 }
 
-// Verifica os padroes mais comuns de nomes para Ethernet fisica no Linux.
+// Verifica os padroes mais comuns de nomes para Ethernet fisica no Linux
 static int eh_ethernet(const char *nome_interface)
 {
     if (strncmp(nome_interface, "eth", 3) == 0 ||
@@ -75,7 +75,7 @@ static int eh_ethernet(const char *nome_interface)
     return 0;
 }
 
-// * Obtém o MAC da interface para preencher o endereço de origem do quadro.
+// Obtém o MAC da interface para preencher o endereço de origem do quadro
 static int obtem_mac_interface(int soquete, const char *nome_interface, unsigned char mac[ETH_ALEN])
 {
     struct ifreq ifr;
@@ -101,7 +101,7 @@ static long long timestamp_ms(void)
     return ((long long)tp.tv_sec * 1000LL) + ((long long)tp.tv_usec / 1000LL);
 }
 
-// Remove o timeout de recebimento e devolve o socket ao modo bloqueante.
+// Remove o timeout de recebimento e devolve o socket ao modo bloqueante
 static int limpa_timeout_recebimento(int soquete)
 {
     struct timeval timeout;
@@ -126,7 +126,7 @@ static int limpa_timeout_recebimento(int soquete)
                          FUNÇÕES PRINCIPAIS
 ======================================================================*/
 
-// Seleciona a interface de rede Ethernet ou loopback.
+// Seleciona a interface de rede Ethernet ou loopback
 char *seleciona_interface_rede(int allow_loopback)
 {
     struct ifaddrs *ifaddr = NULL;
@@ -148,7 +148,7 @@ char *seleciona_interface_rede(int allow_loopback)
             continue;
         }
 
-        // Em teste local, seleciona apenas a interface loopback.
+        // Em teste local, seleciona apenas a interface loopback
         if (allow_loopback)
         {
             if (strcmp(ifa->ifa_name, "lo") == 0 && ifa->ifa_addr->sa_family == AF_PACKET)
@@ -168,7 +168,7 @@ char *seleciona_interface_rede(int allow_loopback)
             continue;
         }
 
-        // Em uso real, ignora loopback, wireless e interfaces virtuais.
+        // Em uso real, ignora loopback, wireless e interfaces virtuais
         if (strcmp(ifa->ifa_name, "lo") == 0 ||
             eh_wireless(ifa->ifa_name) ||
             eh_virtual(ifa->ifa_name) ||
@@ -223,8 +223,8 @@ int cria_raw_socket(char *nome_interface_rede)
 
     /*
      * APAGAR
-     * Usa SOCK_RAW e monta o cabeçalho Ethernet completo.
-     * O envio deixa de depender de payload solto via send().
+     * Usa SOCK_RAW e monta o cabeçalho Ethernet completo
+     * O envio deixa de depender de payload solto via send()
      */
     int soquete = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_PACMAN));
     if (soquete == -1)
@@ -265,7 +265,7 @@ int cria_raw_socket(char *nome_interface_rede)
         return -1;
     }
 
-    // Mantém modo promíscuo para facilitar testes e capturas em laboratório.
+    // Mantém modo promíscuo para facilitar testes
     struct packet_mreq mr;
     memset(&mr, 0, sizeof(mr));
     mr.mr_ifindex = ifindex;
@@ -285,7 +285,7 @@ int cria_raw_socket(char *nome_interface_rede)
     return soquete;
 }
 
-// Espera um quadro do protocolo PacMan e entrega apenas o payload.
+// Espera um quadro do protocolo PacMan e entrega apenas o payload
 ssize_t espera_mensagem_servidor(int soquete, unsigned char *buffer, size_t tamanho_buffer)
 {
     unsigned char quadro[TAM_BUFFER_RAW];
@@ -309,7 +309,7 @@ ssize_t espera_mensagem_servidor(int soquete, unsigned char *buffer, size_t tama
             return recebido;
         }
 
-        // Ignora cópias locais do próprio pacote enviado.
+        // Ignora cópias locais do próprio pacote enviado
         if (endereco_origem.sll_pkttype == PACKET_OUTGOING)
         {
             continue;
@@ -322,7 +322,7 @@ ssize_t espera_mensagem_servidor(int soquete, unsigned char *buffer, size_t tama
 
         struct ether_header *eth = (struct ether_header *)quadro;
 
-        // Descarta tudo que não tenha o EtherType do projeto.
+        // Descarta tudo que não tenha o EtherType do projeto
         if (ntohs(eth->ether_type) != ETH_P_PACMAN)
         {
             continue;
@@ -360,7 +360,7 @@ ssize_t espera_mensagem_servidor(int soquete, unsigned char *buffer, size_t tama
     }
 }
 
-// Envia uma mensagem montando um quadro Ethernet completo.
+// Envia uma mensagem montando um quadro Ethernet completo
 ssize_t envia_mensagem(int soquete, const unsigned char *buffer, size_t tamanho_buffer)
 {
     // Nao ha o que enviar se o ponteiro for nulo ou o payload estiver vazio.
@@ -371,8 +371,8 @@ ssize_t envia_mensagem(int soquete, const unsigned char *buffer, size_t tamanho_
     }
 
     /*
-     * g_ifindex e g_mac_origem sao preenchidos em cria_raw_socket().
-     * Sem esse indice nao sabemos por qual placa de rede o quadro deve sair.
+     * g_ifindex e g_mac_origem sao preenchidos em cria_raw_socket()
+     * Sem esse indice nao sabemos por qual placa de rede o quadro deve sair
      */
     if (g_ifindex == 0)
     {
@@ -383,8 +383,8 @@ ssize_t envia_mensagem(int soquete, const unsigned char *buffer, size_t tamanho_
 
     /*
      * O quadro Ethernet final contem:
-     *   cabecalho Ethernet + payload recebido em buffer.
-     * TAM_BUFFER_RAW limita o tamanho total que esta funcao consegue montar.
+     *   cabecalho Ethernet + payload recebido em buffer
+     * TAM_BUFFER_RAW limita o tamanho total que esta funcao consegue montar
      */
     if (sizeof(struct ether_header) + tamanho_buffer > TAM_BUFFER_RAW)
     {
@@ -398,23 +398,23 @@ ssize_t envia_mensagem(int soquete, const unsigned char *buffer, size_t tamanho_
 
     struct ether_header *eth = (struct ether_header *)quadro;
 
-    /*
-     * Usa broadcast como MAC destino no primeiro teste por cabo.
-     * Assim não é necessário descobrir o MAC da outra máquina nesta etapa.
-     * ff:ff:ff:ff:ff:ff faz a placa enviar o quadro para todos no enlace local.
+    /* 
+     * Usa broadcast como MAC destino no primeiro teste por cabo
+     * Assim não é necessário descobrir o MAC da outra máquina nesta etapa
+     * ff:ff:ff:ff:ff:ff faz a placa enviar o quadro para todos no enlace local
      */
     memset(eth->ether_dhost, 0xff, ETH_ALEN);
 
-    // MAC de origem: endereco fisico da interface escolhida no socket.
+    // MAC de origem: endereco fisico da interface escolhida no socket
     memcpy(eth->ether_shost, g_mac_origem, ETH_ALEN);
 
     /*
-     * EtherType identifica o "protocolo" carregado no quadro.
-     * htons() converte para ordem de bytes de rede, como o Ethernet espera.
+     * EtherType identifica o "protocolo" carregado no quadro
+     * htons() converte para ordem de bytes de rede, como o Ethernet espera
      */
     eth->ether_type = htons(ETH_P_PACMAN);
 
-    // Copia a mensagem logo apos o cabecalho Ethernet.
+    // Copia a mensagem logo apos o cabecalho Ethernet
     memcpy(quadro + sizeof(struct ether_header), buffer, tamanho_buffer);
 
     struct sockaddr_ll endereco_destino;
@@ -422,7 +422,7 @@ ssize_t envia_mensagem(int soquete, const unsigned char *buffer, size_t tamanho_
 
     /*
      * sockaddr_ll informa ao kernel que este envio e de camada 2 (AF_PACKET),
-     * por qual interface fisica deve sair e qual endereco MAC sera usado.
+     * por qual interface fisica deve sair e qual endereco MAC sera usado
      */
     endereco_destino.sll_family = AF_PACKET;
     endereco_destino.sll_ifindex = g_ifindex;
@@ -431,7 +431,7 @@ ssize_t envia_mensagem(int soquete, const unsigned char *buffer, size_t tamanho_
 
     size_t tamanho_quadro = sizeof(struct ether_header) + tamanho_buffer;
 
-    // sendto() envia o quadro Ethernet ja montado.
+    // sendto() envia o quadro Ethernet ja montado
     ssize_t enviado = sendto(soquete,
                              quadro,
                              tamanho_quadro,
@@ -444,14 +444,14 @@ ssize_t envia_mensagem(int soquete, const unsigned char *buffer, size_t tamanho_
         return enviado;
     }
 
-    // Se nem o cabecalho inteiro foi aceito como enviado, o envio e invalido.
+    // Se nem o cabecalho inteiro foi aceito como enviado, o envio e invalido
     if ((size_t)enviado < sizeof(struct ether_header))
     {
         errno = EIO;
         return -1;
     }
 
-    // A interface publica da funcao retorna apenas quantos bytes de payload sairam.
+    // A interface publica da funcao retorna apenas quantos bytes de payload sairam
     return enviado - (ssize_t)sizeof(struct ether_header);
 }
 
@@ -469,7 +469,7 @@ int fecha_raw_socket(int soquete)
 ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
                                 size_t tamanho_buffer, int timeout_ms)
 {
-    // Buffer temporario para o quadro Ethernet completo.
+    // Buffer temporario para o quadro Ethernet completo
     unsigned char quadro[TAM_BUFFER_RAW];
     struct sockaddr_ll endereco_origem;
     socklen_t tamanho_endereco;

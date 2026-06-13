@@ -19,21 +19,21 @@ uint8_t sequencia_esperada = 0;
 
 #define CAMINHO_MAPA_PADRAO "maps/padrao_ufpr.csv"
 
-/*
+/* APAGAR
  * Verifica se o tipo de mensagem pertence aos tipos usados para transmitir
  * arquivos de premio ou arquivos recebidos em blocos.
  */
-// Retorna verdadeiro quando o tipo recebido representa um bloco de arquivo.
+// Retorna verdadeiro quando o tipo recebido representa um bloco de arquivo
 static int tipo_arquivo(uint8_t tipo_msg)
 {
     return tipo_msg == MSG_TXT || tipo_msg == MSG_JPG || tipo_msg == MSG_MP4;
 }
 
-/*
+/* APAGAR
  * Verifica se a mensagem recebida do cliente e uma jogada de movimento do
  * PacMan.
  */
-// Retorna verdadeiro quando a mensagem representa um movimento do PacMan.
+// Retorna verdadeiro quando a mensagem representa um movimento do PacMan
 static int tipo_movimento(uint8_t tipo_msg)
 {
     return tipo_msg == MSG_MOV_CIMA ||
@@ -42,11 +42,11 @@ static int tipo_movimento(uint8_t tipo_msg)
            tipo_msg == MSG_MOV_DIREITA;
 }
 
-/*
+/* APAGAR
  * Traduz o tipo de movimento do protocolo para deslocamento de linha e coluna
  * na matriz do labirinto.
  */
-// Converte o tipo de movimento do protocolo para deslocamento na matriz.
+// Converte o tipo de movimento do protocolo para deslocamento no mapa
 static int deslocamento_movimento(uint8_t tipo_msg, int *deslocamento_x, int *deslocamento_y)
 {
     if (deslocamento_x == NULL || deslocamento_y == NULL)
@@ -80,11 +80,11 @@ static int deslocamento_movimento(uint8_t tipo_msg, int *deslocamento_x, int *de
     }
 }
 
-/*
+/* APAGAR
  * Retorna a extensao usada para salvar um arquivo recebido, de acordo com o
  * tipo de mensagem do protocolo.
  */
-// Escolhe a extensao local usada pelo servidor para salvar o arquivo recebido.
+// Escolhe a extensao usada pelo servidor para salvar o arquivo recebido
 static const char *extensao_saida_arquivo(uint8_t tipo_msg)
 {
     if (tipo_msg == MSG_TXT)
@@ -105,11 +105,11 @@ static const char *extensao_saida_arquivo(uint8_t tipo_msg)
     return NULL;
 }
 
-/*
+/* APAGAR
  * Testa se um caminho ja existe no disco.
  * Usado para escolher um nome de saida sem sobrescrever arquivo anterior.
  */
-// Verifica se um arquivo ja existe sem alterar seu conteudo.
+// Verifica se um arquivo ja existe sem alterar seu conteudo
 static int arquivo_existe(const char *caminho)
 {
     FILE *arquivo = fopen(caminho, "rb");
@@ -123,12 +123,12 @@ static int arquivo_existe(const char *caminho)
     return 1;
 }
 
-/*
+/* APAGAR
  * Monta um caminho recebido_NNN.ext disponivel para salvar o proximo arquivo.
  * Retorna erro se a extensao nao for suportada, se o buffer for invalido ou se
  * todos os nomes ate recebido_999.ext ja existirem.
  */
-// Monta um nome de saida livre para nao sobrescrever arquivos anteriores.
+// Monta um nome de saida livre para nao sobrescrever arquivos anteriores
 static int monta_caminho_saida_arquivo(uint8_t tipo_msg, char *caminho_saida,
                                        size_t tamanho_caminho_saida)
 {
@@ -139,7 +139,7 @@ static int monta_caminho_saida_arquivo(uint8_t tipo_msg, char *caminho_saida,
         return -1;
     }
 
-    // Procura o primeiro nome recebido_NNN.ext que ainda nao existe.
+    // Procura o primeiro nome recebido_NNN.ext que ainda nao existe
     for (int indice = 1; indice <= 999; indice++)
     {
         int escritos = snprintf(
@@ -164,7 +164,7 @@ static int monta_caminho_saida_arquivo(uint8_t tipo_msg, char *caminho_saida,
     return -1;
 }
 
-/*
+/* APAGAR
  * Imprime no terminal os campos de uma mensagem protocolada.
  * Serve para debug de pacotes recebidos que nao sao tratados por outro fluxo.
  */
@@ -203,7 +203,7 @@ static void imprime_mensagem_protocolada(const mensagem_t *mensagem)
 }
 
 
-/*
+/* APAGAR
  * Acrescenta um fragmento recebido ao buffer da transmissao atual.
  * A funcao realoca o buffer quando o espaco disponivel nao e suficiente.
  */
@@ -255,7 +255,7 @@ static int remonta_mensagem(uint8_t **buffer, size_t *tamanho_atual,
     return 0;
 }
 
-/*
+/* APAGAR
  * Imprime no terminal uma mensagem completa depois que todos os fragmentos
  * foram recebidos.
  */
@@ -275,11 +275,11 @@ static void imprime_mensagem_completa(const uint8_t *buffer, size_t tamanho)
     fflush(stdout);
 }
 
-/*
+/* APAGAR
  * Salva no disco um arquivo recebido por transmissao fragmentada.
  * O nome de saida e escolhido automaticamente para evitar sobrescrita.
  */
-// Grava o buffer remontado quando a transmissao recebida era de arquivo.
+// Grava o buffer remontado quando a transmissao recebida era de arquivo
 static int salva_arquivo_completo(uint8_t tipo_msg, const uint8_t *buffer, size_t tamanho)
 {
     char caminho_saida[64];
@@ -317,11 +317,11 @@ static int salva_arquivo_completo(uint8_t tipo_msg, const uint8_t *buffer, size_
     return 0;
 }
 
-/*
+/* APAGAR
  * Gera a visualizacao textual do jogo e envia esse buffer ao cliente usando
  * fragmentacao do protocolo e controle de ACK/NACK.
  */
-// Gera a visualizacao atual do jogo e envia o mapa completo ao cliente.
+// Gera a visualizacao atual do jogo e envia o mapa completo ao cliente
 static int envia_mapa_completo(int soquete, const jogo_t *jogo)
 {
     char visualizacao[JOGO_VISUALIZACAO_MAX];
@@ -350,11 +350,10 @@ static int envia_mapa_completo(int soquete, const jogo_t *jogo)
 ======================================================================*/
 
 /*
- * Executa o loop principal do servidor.
+ * Executa o loop principal do servidor
  * Inicializa o jogo, recebe pacotes do cliente, valida sequencia/CRC, trata
- * pedidos de mapa, movimentos, arquivos e mensagens comuns, e envia ACK/NACK.
+ * pedidos de mapa, movimentos, arquivos e mensagens comuns, e envia ACK/NACK
  */
-// Fica em loop infinito esperando pacotes
 int executa_servidor(int soquete)
 {
     // Buffer que recebe um pacote PacMan ja sem cabecalho Ethernet
@@ -487,7 +486,6 @@ int executa_servidor(int soquete)
         }
 
         // Trata o fim da transmissao
-        // Fragmentos de arquivo tambem sao acumulados ate o fim da transmissao.
         if (tipo_arquivo(mensagem.tipo_msg))
         {
             tipo_transmissao_atual = mensagem.tipo_msg;
@@ -528,7 +526,7 @@ int executa_servidor(int soquete)
                 return -1;
             }
 
-            /*
+            /* APAGAR
              * O cliente atual inicia a sequencia em 0 a cada execucao.
              * Depois de responder ao pedido do mapa, o servidor aceita um
              * novo pedido independente tambem a partir da sequencia 0.
@@ -599,7 +597,7 @@ int executa_servidor(int soquete)
             tamanho_recebido = 0;
             capacidade_recebido = 0;
             tipo_transmissao_atual = MSG_DADOS;
-            /*
+            /* APAGAR
              * Cada execucao do cliente comeca a sequencia em 0.
              * Ao terminar uma transmissao completa, o servidor volta para 0
              * para aceitar um novo arquivo ou mensagem logo em seguida.

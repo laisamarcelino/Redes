@@ -183,7 +183,7 @@ int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem, uint8_t *proxima
         return ERRO;
     }
 
-    // Define a sequência atual; reenvios mantem este mesmo numero.
+    // Define a sequência atual; reenvios mantem este mesmo numero
     mensagem->num_sequencia_msg = *proxima_sequencia;
 
     if (monta_pacote(mensagem, pacote, &tamanho_pacote) != 0)
@@ -287,7 +287,7 @@ int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem, uint8_t *proxima
     return ERRO;
 }
 
-// Envia mensagens grandes, separando-as em blocos do tamanho maximo do protocolo.
+// Envia mensagens grandes, separando-as em blocos do tamanho maximo do protocolo
 int envia_buffer_protocolado(int soquete, uint8_t tipo_msg, const uint8_t *buffer,
                              size_t tamanho_buffer, uint8_t *proxima_sequencia)
 {

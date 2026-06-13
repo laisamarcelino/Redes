@@ -242,7 +242,7 @@ static int recebe_mapa_completo(int soquete)
                          FUNÇÕES PRINCIPAIS
 ======================================================================*/
 
-/*
+/* 
  * Executa o modo cliente.
  * Decide se o argumento representa envio de arquivo, pedido de mapa,
  * movimento do PacMan ou mensagem comum, e usa o protocolo adequado.
