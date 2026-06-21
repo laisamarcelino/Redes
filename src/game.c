@@ -216,6 +216,8 @@ void inicializa_jogo(jogo_t *jogo)
 
     jogo->terminou = 0;
     jogo->venceu = 0;
+
+    jogo->verde_prefere_direita = 0;
 }
 
 /* APAGAR
@@ -577,4 +579,137 @@ int movimenta_pacman(jogo_t *jogo, int deslocamento_x, int deslocamento_y)
     }
 
     return SUCESSO;
+}
+
+/* ===================================================================
+                     MOVIMENTACAO DOS FANTASMAS
+======================================================================*/
+
+/*
+ * delta_x/delta_y: deslocamento de linha e coluna para cada direcao.
+ * O indice segue a ordem CIMA=0, DIREITA=1, BAIXO=2, ESQUERDA=3.
+ */
+static const int dx[4] = {-1,  0,  1,  0};
+static const int dy[4] = { 0,  1,  0, -1};
+
+// Retorna 1 se (x, y) esta dentro do mapa e nao e parede.
+static int passavel_fantasma(const jogo_t *jogo, int x, int y)
+{
+    return posicao_valida(x, y) && jogo->mapa[x][y] != LAB_PAREDE;
+}
+
+// Move um fantasma para (nx, ny) e detecta colisao com o PacMan.
+static void aplica_movimento_fantasma(jogo_t *jogo, entidade_t *f, int dir)
+{
+    int nx = f->posicao_x + dx[dir];
+    int ny = f->posicao_y + dy[dir];
+
+    f->direcao = dir;
+    f->posicao_x = nx;
+    f->posicao_y = ny;
+
+    if (jogo->pacman.ativo &&
+        jogo->pacman.posicao_x == nx &&
+        jogo->pacman.posicao_y == ny)
+    {
+        jogo->terminou = 1;
+        jogo->venceu = 0;
+    }
+}
+
+/*
+ * Percorre a lista de prioridade de direcoes e move o fantasma para a
+ * primeira que nao seja parede.
+ */
+static void move_com_prioridade(jogo_t *jogo, entidade_t *f, const int prio[4])
+{
+    for (int i = 0; i < 4; i++)
+    {
+        int dir = prio[i];
+        int nx = f->posicao_x + dx[dir];
+        int ny = f->posicao_y + dy[dir];
+
+        if (passavel_fantasma(jogo, nx, ny))
+        {
+            aplica_movimento_fantasma(jogo, f, dir);
+            return;
+        }
+    }
+}
+
+// Vermelho: mao esquerda — esquerda relativa, frente, direita, tras.
+static void move_mao_esquerda(jogo_t *jogo, entidade_t *f)
+{
+    int dir = (f->direcao < 0) ? DIRECAO_CIMA : f->direcao;
+    int prio[4] = {
+        (dir + 3) % 4, // esquerda relativa
+        dir,           // frente
+        (dir + 1) % 4, // direita relativa
+        (dir + 2) % 4  // tras
+    };
+    move_com_prioridade(jogo, f, prio);
+}
+
+// Azul: mao direita — direita relativa, frente, esquerda, tras.
+static void move_mao_direita(jogo_t *jogo, entidade_t *f)
+{
+    int dir = (f->direcao < 0) ? DIRECAO_CIMA : f->direcao;
+    int prio[4] = {
+        (dir + 1) % 4, // direita relativa
+        dir,           // frente
+        (dir + 3) % 4, // esquerda relativa
+        (dir + 2) % 4  // tras
+    };
+    move_com_prioridade(jogo, f, prio);
+}
+
+// Verde: alterna entre mao direita e mao esquerda a cada passo.
+static void move_verde(jogo_t *jogo, entidade_t *f)
+{
+    if (jogo->verde_prefere_direita)
+        move_mao_direita(jogo, f);
+    else
+        move_mao_esquerda(jogo, f);
+
+    jogo->verde_prefere_direita = !jogo->verde_prefere_direita;
+}
+
+// Amarelo: escolhe aleatoriamente entre as direcoes disponiveis.
+static void move_aleatorio(jogo_t *jogo, entidade_t *f)
+{
+    int validas[4];
+    int n = 0;
+
+    inicializa_srand();
+
+    for (int d = 0; d < 4; d++)
+    {
+        int nx = f->posicao_x + dx[d];
+        int ny = f->posicao_y + dy[d];
+        if (passavel_fantasma(jogo, nx, ny))
+            validas[n++] = d;
+    }
+
+    if (n == 0)
+        return;
+
+    aplica_movimento_fantasma(jogo, f, validas[rand() % n]);
+}
+
+void movimenta_fantasmas(jogo_t *jogo)
+{
+    if (jogo == NULL || jogo->terminou)
+        return;
+
+    if (jogo->fantasma_vermelho.ativo)
+        move_mao_esquerda(jogo, &jogo->fantasma_vermelho);
+
+    if (jogo->fantasma_azul.ativo && !jogo->terminou)
+        move_mao_direita(jogo, &jogo->fantasma_azul);
+
+    if (jogo->fantasma_verde.ativo && !jogo->terminou)
+        move_verde(jogo, &jogo->fantasma_verde);
+
+    if (jogo->fantasma_amarelo.ativo && !jogo->terminou)
+        move_aleatorio(jogo, &jogo->fantasma_amarelo);
 }

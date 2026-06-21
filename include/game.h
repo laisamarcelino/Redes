@@ -73,6 +73,8 @@ typedef struct {
 
     int terminou;
     int venceu;
+
+    int verde_prefere_direita;
 } jogo_t;
 
 /* Zera o estado do jogo e deixa o mapa todo vazio. */
@@ -99,5 +101,8 @@ int gera_visualizacao(const jogo_t *jogo, char *saida, size_t capacidade, size_t
 
 // Move o PacMan por um deslocamento de uma casa e atualiza o estado da rodada.
 int movimenta_pacman(jogo_t *jogo, int deslocamento_x, int deslocamento_y);
+
+// Move todos os fantasmas ativos de acordo com suas regras individuais.
+void movimenta_fantasmas(jogo_t *jogo);
 
 #endif

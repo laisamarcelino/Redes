@@ -558,6 +558,8 @@ int executa_servidor(int soquete)
                 return -1;
             }
 
+            movimenta_fantasmas(&jogo);
+
             if (envia_mapa_completo(soquete, &jogo) != 0)
             {
                 free(buffer_recebido);
