@@ -240,8 +240,6 @@ static int recebe_mapa_completo(int soquete)
     }
 }
 
-#define TIMEOUT_ARQUIVO_MS 2000
-
 // Abre o arquivo com o programa padrao do sistema sem bloquear o jogo.
 static void abre_arquivo_externo(const char *caminho)
 {
@@ -289,9 +287,9 @@ static void exibe_arquivo_recebido(uint8_t tipo, const uint8_t *buffer, size_t t
 }
 
 /*
- * Tenta receber um arquivo enviado pelo servidor logo apos o mapa.
- * Aguarda o primeiro pacote com timeout; se nao chegar nada, retorna
- * sem bloquear o proximo comando do usuario.
+ * Recebe o arquivo enviado pelo servidor logo apos o mapa.
+ * O servidor garante enviar sempre algo (arquivo ou FIM_TRANSMISSAO vazio),
+ * portanto nao e necessario timeout — usa recebimento bloqueante direto.
  */
 static void recebe_arquivo_se_disponivel(int soquete)
 {
@@ -302,46 +300,27 @@ static void recebe_arquivo_se_disponivel(int soquete)
     size_t tamanho = 0;
     size_t capacidade = 0;
     uint8_t tipo_atual = MSG_DADOS;
-    int recebendo = 0;
 
     while (1)
     {
-        ssize_t recebido;
+        ssize_t recebido = espera_mensagem_servidor(soquete, pacote, sizeof(pacote));
 
-        if (!recebendo)
+        if (recebido < 0)
         {
-            recebido = espera_mensagem_timeout(
-                soquete,
-                pacote,
-                sizeof(pacote),
-                TIMEOUT_ARQUIVO_MS);
-
-            if (recebido == REDE_TIMEOUT || recebido <= 0)
-                return;
+            if (errno == EINTR) continue;
+            free(buffer);
+            return;
         }
-        else
-        {
-            recebido = espera_mensagem_servidor(soquete, pacote, sizeof(pacote));
 
-            if (recebido < 0)
-            {
-                if (errno == EINTR) continue;
-                free(buffer);
-                return;
-            }
-
-            if (recebido == 0) continue;
-        }
+        if (recebido == 0) continue;
 
         if (desmonta_pacote(pacote, (size_t)recebido, &mensagem) != 0)
         {
             if ((size_t)recebido >= TAMANHO_CABECALHO_PROTOCOLO &&
                 pacote[0] == MARCADOR_INICIO)
             {
-                envia_ack_nack(
-                    soquete,
-                    MSG_NACK,
-                    extrai_sequencia_pacote_bruto(pacote));
+                envia_ack_nack(soquete, MSG_NACK,
+                               extrai_sequencia_pacote_bruto(pacote));
             }
             continue;
         }
@@ -359,28 +338,27 @@ static void recebe_arquivo_se_disponivel(int soquete)
             continue;
         }
 
-        // Primeiro pacote deve ser de arquivo; qualquer outro tipo cancela
-        if (!recebendo &&
-            mensagem.tipo_msg != MSG_TXT &&
-            mensagem.tipo_msg != MSG_JPG &&
-            mensagem.tipo_msg != MSG_MP4)
-        {
-            return;
-        }
-
+        // FIM_TRANSMISSAO: fim do arquivo (ou sinal de "sem arquivo")
         if (mensagem.tipo_msg == MSG_FIM_TRANSMISSAO)
         {
             envia_ack_nack(soquete, MSG_ACK, mensagem.num_sequencia_msg);
-
             if (buffer != NULL)
                 exibe_arquivo_recebido(tipo_atual, buffer, tamanho);
+            free(buffer);
+            return;
+        }
 
+        // Tipo inesperado: nao e arquivo, desbloqueia sem exibir nada
+        if (mensagem.tipo_msg != MSG_TXT &&
+            mensagem.tipo_msg != MSG_JPG &&
+            mensagem.tipo_msg != MSG_MP4)
+        {
+            envia_ack_nack(soquete, MSG_NACK, mensagem.num_sequencia_msg);
             free(buffer);
             return;
         }
 
         tipo_atual = mensagem.tipo_msg;
-        recebendo = 1;
 
         if (tamanho + mensagem.tamanho_dados > capacidade)
         {

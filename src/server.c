@@ -615,7 +615,8 @@ int executa_servidor(int soquete)
                 return -1;
             }
 
-            // Colisao com fantasma tem prioridade sobre premio de pastilha
+            // Colisao com fantasma tem prioridade sobre premio de pastilha.
+            // O servidor sempre envia algo apos o mapa para desbloquear o cliente.
             if (jogo.terminou && !jogo.venceu)
             {
                 jogo.ultima_pastilha_coletada = 0;
@@ -624,6 +625,12 @@ int executa_servidor(int soquete)
             else if (jogo.ultima_pastilha_coletada != 0)
             {
                 envia_premio(soquete, &jogo);
+            }
+            else
+            {
+                // Sem arquivo: envia apenas FIM_TRANSMISSAO para desbloquear o cliente
+                uint8_t seq = 0;
+                envia_buffer_protocolado(soquete, MSG_DADOS, NULL, 0, &seq);
             }
 
             sequencia_esperada = 0;
