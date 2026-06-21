@@ -3,15 +3,11 @@
 
 #include "protocol.h"
 
-/* Abre o arquivo de log e lanca um xterm com tail -f nele.
- * Retorna 0 em sucesso; o xterm e opcional (falha silenciosa). */
-int  log_abre(const char *caminho);
+/* Ativa ou desativa a saida de log no stdout (0 = off, 1 = on). */
+void log_define_ativo(int ativo);
 
 /* Define o contexto exibido em cada linha ("SRV" ou "CLI"). */
 void log_define_contexto(const char *ctx);
-
-/* Fecha o arquivo de log. */
-void log_fecha(void);
 
 /* Registra uma mensagem de protocolo.
  * direcao: "SEND" ou "RECV" */

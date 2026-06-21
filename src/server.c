@@ -456,7 +456,6 @@ int executa_servidor(int soquete, const char *caminho_mapa)
     const char *mapa = (caminho_mapa != NULL) ? caminho_mapa : CAMINHO_MAPA_PADRAO;
     printf("Carregando mapa: %s\n", mapa);
 
-    log_abre("pacman.log");
     log_define_contexto("SRV");
     log_evento("mapa: %s", mapa);
 
