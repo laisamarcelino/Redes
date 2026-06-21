@@ -394,6 +394,43 @@ static int envia_arquivo_colisao(int soquete)
         &seq);
 }
 
+/*
+ * Envia a resposta completa apos o mapa:
+ *   1. Arquivo de premio / colisao  -ou-  FIM_TRANSMISSAO vazio (sem arquivo)
+ *   2. MSG_FIM_JOGO com status: 0=continua 1=vitoria 2=derrota
+ *
+ * O cliente sempre espera exatamente essa sequencia, sem timeout.
+ */
+static int envia_resposta_completa(int soquete, jogo_t *jogo)
+{
+    // --- parte 1: arquivo ou sinal de "sem arquivo" ---
+    if (jogo->terminou && !jogo->venceu)
+    {
+        jogo->ultima_pastilha_coletada = 0;
+        envia_arquivo_colisao(soquete);
+    }
+    else if (jogo->ultima_pastilha_coletada != 0)
+    {
+        envia_premio(soquete, jogo);
+    }
+    else
+    {
+        uint8_t seq = 0;
+        envia_buffer_protocolado(soquete, MSG_DADOS, NULL, 0, &seq);
+    }
+
+    // --- parte 2: status do jogo ---
+    mensagem_t fim;
+    memset(&fim, 0, sizeof(fim));
+    fim.tipo_msg      = MSG_FIM_JOGO;
+    fim.tamanho_dados = 1;
+    fim.dados[0]      = (uint8_t)(jogo->terminou
+                            ? (jogo->venceu ? 1 : 2)
+                            : 0);
+    uint8_t seq = 0;
+    return envia_pacote_com_reenvio(soquete, &fim, &seq);
+}
+
 /* ===================================================================
                          FUNÇÕES PRINCIPAIS
 ======================================================================*/
@@ -575,6 +612,10 @@ int executa_servidor(int soquete)
                 return -1;
             }
 
+            // Envia FIM_TRANSMISSAO (sem arquivo) + MSG_FIM_JOGO=0 para sincronizar
+            // o cliente interativo. Ver envia_resposta_completa.
+            envia_resposta_completa(soquete, &jogo);
+
             /* APAGAR
              * O cliente atual inicia a sequencia em 0 a cada execucao.
              * Depois de responder ao pedido do mapa, o servidor aceita um
@@ -615,23 +656,9 @@ int executa_servidor(int soquete)
                 return -1;
             }
 
-            // Colisao com fantasma tem prioridade sobre premio de pastilha.
-            // O servidor sempre envia algo apos o mapa para desbloquear o cliente.
-            if (jogo.terminou && !jogo.venceu)
-            {
-                jogo.ultima_pastilha_coletada = 0;
-                envia_arquivo_colisao(soquete);
-            }
-            else if (jogo.ultima_pastilha_coletada != 0)
-            {
-                envia_premio(soquete, &jogo);
-            }
-            else
-            {
-                // Sem arquivo: envia apenas FIM_TRANSMISSAO para desbloquear o cliente
-                uint8_t seq = 0;
-                envia_buffer_protocolado(soquete, MSG_DADOS, NULL, 0, &seq);
-            }
+            // Envia arquivo (premio/colisao) ou sinal vazio + MSG_FIM_JOGO.
+            // Ver envia_resposta_completa.
+            envia_resposta_completa(soquete, &jogo);
 
             sequencia_esperada = 0;
 

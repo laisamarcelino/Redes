@@ -398,6 +398,115 @@ static void recebe_arquivo_se_disponivel(int soquete)
     }
 }
 
+// Recebe o pacote MSG_FIM_JOGO e retorna o status: 0=continua 1=vitoria 2=derrota.
+static int recebe_fim_jogo(int soquete)
+{
+    uint8_t pacote[TAMANHO_MAX_PACOTE];
+    mensagem_t mensagem;
+
+    while (1)
+    {
+        ssize_t recebido = espera_mensagem_servidor(soquete, pacote, sizeof(pacote));
+
+        if (recebido < 0)
+        {
+            if (errno == EINTR) continue;
+            return 0;
+        }
+
+        if (recebido == 0) continue;
+
+        if (desmonta_pacote(pacote, (size_t)recebido, &mensagem) != 0)
+        {
+            if ((size_t)recebido >= TAMANHO_CABECALHO_PROTOCOLO &&
+                pacote[0] == MARCADOR_INICIO)
+                envia_ack_nack(soquete, MSG_NACK,
+                               extrai_sequencia_pacote_bruto(pacote));
+            continue;
+        }
+
+        if (mensagem.tipo_msg != MSG_FIM_JOGO) continue;
+
+        envia_ack_nack(soquete, MSG_ACK, mensagem.num_sequencia_msg);
+
+        return (mensagem.tamanho_dados >= 1) ? (int)mensagem.dados[0] : 0;
+    }
+}
+
+// Recebe arquivo (ou sinal vazio) seguido de MSG_FIM_JOGO.
+// Retorna: 0=continua 1=vitoria 2=derrota.
+static int recebe_resposta_completa(int soquete)
+{
+    recebe_arquivo_se_disponivel(soquete);
+    return recebe_fim_jogo(soquete);
+}
+
+// Loop interativo: pede o mapa inicial e depois recebe movimentos do usuario.
+static int executa_jogo_interativo(int soquete)
+{
+    char entrada[64];
+    int rodada = 0;
+
+    printf("Conectando ao servidor...\n");
+
+    proxima_sequencia_cliente = 0;
+    if (envia_pedido_mapa(soquete) != 0)
+        return -1;
+
+    printf("\033[2J\033[H");
+    if (recebe_mapa_completo(soquete) != 0)
+        return -1;
+
+    recebe_resposta_completa(soquete); // FIM_TRANSMISSAO vazio + FIM_JOGO=0
+
+    while (1)
+    {
+        printf("\nRodada %d | w=cima  s=baixo  a=esq  d=dir  q=sair: ", rodada);
+        fflush(stdout);
+
+        if (fgets(entrada, sizeof(entrada), stdin) == NULL)
+            break;
+
+        entrada[strcspn(entrada, "\n")] = '\0';
+
+        if (strcmp(entrada, "q") == 0 || strcmp(entrada, "quit") == 0)
+            break;
+
+        uint8_t tipo = tipo_movimento_por_texto(entrada);
+        if (tipo == MSG_ERRO)
+        {
+            printf("Comando invalido. Use w / a / s / d.\n");
+            continue;
+        }
+
+        proxima_sequencia_cliente = 0; // servidor reinicia a sequencia apos cada resposta
+        if (envia_movimento_pacman(soquete, tipo) != 0)
+            return -1;
+
+        rodada++;
+        printf("\033[2J\033[H");
+
+        if (recebe_mapa_completo(soquete) != 0)
+            return -1;
+
+        int status = recebe_resposta_completa(soquete);
+
+        if (status == 1)
+        {
+            printf("\n=== VITORIA! Voce coletou todas as pastilhas! ===\n");
+            break;
+        }
+
+        if (status == 2)
+        {
+            printf("\n=== DERROTA! O PacMan foi pego por um fantasma! ===\n");
+            break;
+        }
+    }
+
+    return 0;
+}
+
 /* ===================================================================
                          FUNÇÕES PRINCIPAIS
 ======================================================================*/
@@ -447,6 +556,9 @@ int executa_cliente(int soquete, const char *mensagem)
      * Pedido temporario de jogo:
      * envia MSG_INICIALIZACAO e aguarda o servidor responder com o mapa completo.
      */
+    if (strcmp(mensagem, "jogar") == 0)
+        return executa_jogo_interativo(soquete);
+
     if (strcmp(mensagem, "mapa") == 0 || strcmp(mensagem, "iniciar") == 0)
     {
         if (envia_pedido_mapa(soquete) != 0)
@@ -454,7 +566,11 @@ int executa_cliente(int soquete, const char *mensagem)
             return -1;
         }
 
-        return recebe_mapa_completo(soquete);
+        if (recebe_mapa_completo(soquete) != 0)
+            return -1;
+
+        recebe_resposta_completa(soquete); // consome FIM_TRANSMISSAO + FIM_JOGO
+        return 0;
     }
 
     tipo_movimento = tipo_movimento_por_texto(mensagem);
@@ -466,7 +582,7 @@ int executa_cliente(int soquete, const char *mensagem)
         }
 
         int resultado = recebe_mapa_completo(soquete);
-        recebe_arquivo_se_disponivel(soquete);
+        recebe_resposta_completa(soquete); // consome arquivo + FIM_JOGO
         return resultado;
     }
 
