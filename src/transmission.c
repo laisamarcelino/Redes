@@ -67,7 +67,7 @@ int envia_ack_nack(int soquete, uint8_t tipo_resposta, uint8_t sequencia)
     log_ctrl.tipo_msg          = tipo_resposta;
     log_ctrl.num_sequencia_msg = sequencia;
     log_ctrl.tamanho_dados     = 0;
-    log_mensagem("SEND", &log_ctrl);
+    log_mensagem("SRV", &log_ctrl);
 
     return SUCESSO;
 }
@@ -137,14 +137,13 @@ int espera_ack_nack_com_timeout(int soquete, uint8_t sequencia_esperada)
         // ACK confirma o pacote enviado
         if (resposta.tipo_msg == MSG_ACK)
         {
-            log_mensagem("RECV", &resposta);
             return MSG_ACK;
         }
 
         // NACK pede reenvio do pacote
         if (resposta.tipo_msg == MSG_NACK)
         {
-            log_mensagem("RECV", &resposta);
+            log_evento("ERRO CLI NACK seq=%02u", resposta.num_sequencia_msg);
             return MSG_NACK;
         }
 
@@ -204,9 +203,9 @@ int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem, uint8_t *proxima
         memcpy(pacote_envio, pacote, tamanho_pacote);
 
         if (tentativa == 1)
-            log_mensagem("SEND", mensagem);
+            log_mensagem("SRV", mensagem);
         else
-            log_evento("SEND reenvio seq=%02u tentativa %d/%d",
+            log_evento("ERRO SRV reenvio seq=%02u tentativa %d/%d",
                        mensagem->num_sequencia_msg, tentativa, MAX_TENTATIVAS_ENVIO);
 
         // Envia o pacote pela camada de rede
@@ -253,7 +252,7 @@ int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem, uint8_t *proxima
         // NACK faz repetir a mesma sequencia
         if (resposta == MSG_NACK)
         {
-            log_evento("NACK recebido para seq=%02u, reenviando",
+            log_evento("ERRO CLI NACK seq=%02u, reenviando",
                        mensagem->num_sequencia_msg);
             continue;
         }
@@ -261,7 +260,7 @@ int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem, uint8_t *proxima
         // Timeout tambem faz repetir a mesma sequencia
         if (resposta == REDE_TIMEOUT)
         {
-            log_evento("timeout seq=%02u, reenviando", mensagem->num_sequencia_msg);
+            log_evento("ERRO timeout seq=%02u, reenviando", mensagem->num_sequencia_msg);
             continue;
         }
 

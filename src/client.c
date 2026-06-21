@@ -5,6 +5,7 @@
 #include "protocol.h"
 #include "files.h"
 #include "transmission.h"
+#include "log.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -174,6 +175,8 @@ static int recebe_mapa_completo(int soquete)
             continue;
         }
 
+        log_mensagem("RECV", &mensagem);
+
         if (mensagem.num_sequencia_msg ==
             calcula_sequencia_anterior(sequencia_esperada))
         {
@@ -338,6 +341,8 @@ static void recebe_arquivo_se_disponivel(int soquete)
             continue;
         }
 
+        log_mensagem("RECV", &mensagem);
+
         if (mensagem.num_sequencia_msg ==
             calcula_sequencia_anterior(sequencia_esperada))
         {
@@ -424,6 +429,8 @@ static int recebe_fim_jogo(int soquete)
                                extrai_sequencia_pacote_bruto(pacote));
             continue;
         }
+
+        log_mensagem("RECV", &mensagem);
 
         if (mensagem.tipo_msg != MSG_FIM_JOGO) continue;
 

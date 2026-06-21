@@ -7,7 +7,7 @@
 #include <time.h>
 
 static int  log_ativo    = 0;
-static char log_contexto[8] = "---";
+static char log_contexto[8] = "SRV";
 
 void log_define_ativo(int ativo)
 {
@@ -51,7 +51,7 @@ static void escreve_prefixo(void)
     struct tm *tm_info = localtime(&agora);
     char buf[16];
     strftime(buf, sizeof(buf), "%H:%M:%S", tm_info);
-    printf("[%s] [%s] ", buf, log_contexto);
+    printf("[%s] ", buf);
 }
 
 void log_mensagem(const char *direcao, const mensagem_t *msg)
@@ -60,7 +60,7 @@ void log_mensagem(const char *direcao, const mensagem_t *msg)
         return;
 
     escreve_prefixo();
-    printf("%s  %-16s  seq=%02u  %u bytes\n",
+    printf("%-10s  %-16s  seq=%02u  %u bytes\n",
            direcao,
            nome_tipo(msg->tipo_msg),
            msg->num_sequencia_msg,

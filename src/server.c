@@ -524,7 +524,7 @@ int executa_servidor(int soquete, const char *caminho_mapa)
             continue;
         }
 
-        log_mensagem("RECV", &mensagem);
+        log_mensagem("CLI", &mensagem);
 
         /* APAGAR
          * Se o servidor já aceitou esse pacote antes ele nao reprocessa o pacote
