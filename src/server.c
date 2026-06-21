@@ -6,6 +6,7 @@
 #include "files.h"
 #include "transmission.h"
 #include "game.h"
+#include "log.h"
 
 #include <errno.h>
 #include <stdlib.h>
@@ -455,6 +456,10 @@ int executa_servidor(int soquete, const char *caminho_mapa)
     const char *mapa = (caminho_mapa != NULL) ? caminho_mapa : CAMINHO_MAPA_PADRAO;
     printf("Carregando mapa: %s\n", mapa);
 
+    log_abre("pacman.log");
+    log_define_contexto("SRV");
+    log_evento("mapa: %s", mapa);
+
     if (carrega_mapa_csv(&jogo, mapa) != 0)
     {
         return -1;
@@ -519,6 +524,8 @@ int executa_servidor(int soquete, const char *caminho_mapa)
 
             continue;
         }
+
+        log_mensagem("RECV", &mensagem);
 
         /* APAGAR
          * Se o servidor já aceitou esse pacote antes ele nao reprocessa o pacote
@@ -651,7 +658,20 @@ int executa_servidor(int soquete, const char *caminho_mapa)
                 return -1;
             }
 
+            log_evento("pacman (%d,%d) rodada=%d raio=%d",
+                       jogo.pacman.posicao_x, jogo.pacman.posicao_y,
+                       jogo.rodada, jogo.raio_visao);
+
+            if (jogo.ultima_pastilha_coletada != 0)
+                log_evento("pastilha '%c' coletada (%d/%d)",
+                           (char)jogo.ultima_pastilha_coletada,
+                           jogo.pastilhas_coletadas, TOTAL_PASTILHAS);
+
             movimenta_fantasmas(&jogo);
+
+            if (jogo.terminou)
+                log_evento("jogo encerrado: %s",
+                           jogo.venceu ? "VITORIA" : "DERROTA por colisao");
 
             if (envia_mapa_completo(soquete, &jogo) != 0)
             {

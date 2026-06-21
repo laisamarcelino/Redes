@@ -3,6 +3,7 @@
 #include "transmission.h"
 #include "network.h"
 #include "protocol.h"
+#include "log.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -62,14 +63,11 @@ int envia_ack_nack(int soquete, uint8_t tipo_resposta, uint8_t sequencia)
         return ERRO;
     }
 
-    if (tipo_resposta == MSG_ACK)
-    {
-        printf("[DEBUG] ACK enviado para seq=%u\n", sequencia);
-    }
-    else
-    {
-        printf("[DEBUG] NACK enviado para seq=%u\n", sequencia);
-    }
+    mensagem_t log_ctrl;
+    log_ctrl.tipo_msg          = tipo_resposta;
+    log_ctrl.num_sequencia_msg = sequencia;
+    log_ctrl.tamanho_dados     = 0;
+    log_mensagem("SEND", &log_ctrl);
 
     return SUCESSO;
 }
@@ -139,14 +137,14 @@ int espera_ack_nack_com_timeout(int soquete, uint8_t sequencia_esperada)
         // ACK confirma o pacote enviado
         if (resposta.tipo_msg == MSG_ACK)
         {
-            printf("[DEBUG] ACK recebido para seq=%u\n", sequencia_esperada);
+            log_mensagem("RECV", &resposta);
             return MSG_ACK;
         }
 
         // NACK pede reenvio do pacote
         if (resposta.tipo_msg == MSG_NACK)
         {
-            printf("[DEBUG] NACK recebido para seq=%u\n", sequencia_esperada);
+            log_mensagem("RECV", &resposta);
             return MSG_NACK;
         }
 
@@ -205,12 +203,11 @@ int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem, uint8_t *proxima
         // Enviamos uma copia para evitar alterar o pacote original
         memcpy(pacote_envio, pacote, tamanho_pacote);
 
-        printf("[DEBUG] Enviando pacote tipo=%u seq=%u tam=%u tentativa %d/%d\n",
-               mensagem->tipo_msg,
-               mensagem->num_sequencia_msg,
-               mensagem->tamanho_dados,
-               tentativa,
-               MAX_TENTATIVAS_ENVIO);
+        if (tentativa == 1)
+            log_mensagem("SEND", mensagem);
+        else
+            log_evento("SEND reenvio seq=%02u tentativa %d/%d",
+                       mensagem->num_sequencia_msg, tentativa, MAX_TENTATIVAS_ENVIO);
 
         // Envia o pacote pela camada de rede
         ssize_t enviado = envia_mensagem(
@@ -249,29 +246,22 @@ int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem, uint8_t *proxima
         // ACK libera o proximo numero de sequencia
         if (resposta == MSG_ACK)
         {
-            printf("[DEBUG] ACK recebido para seq=%u\n",
-                   mensagem->num_sequencia_msg);
-
             *proxima_sequencia = calcula_proxima_sequencia(*proxima_sequencia);
-
             return SUCESSO;
         }
 
         // NACK faz repetir a mesma sequencia
         if (resposta == MSG_NACK)
         {
-            fprintf(stderr,
-                    "[DEBUG] NACK recebido para seq=%u. Reenviando...\n",
-                    mensagem->num_sequencia_msg);
+            log_evento("NACK recebido para seq=%02u, reenviando",
+                       mensagem->num_sequencia_msg);
             continue;
         }
 
         // Timeout tambem faz repetir a mesma sequencia
         if (resposta == REDE_TIMEOUT)
         {
-            fprintf(stderr,
-                    "[DEBUG] Timeout esperando resposta da seq=%u. Reenviando...\n",
-                    mensagem->num_sequencia_msg);
+            log_evento("timeout seq=%02u, reenviando", mensagem->num_sequencia_msg);
             continue;
         }
 
@@ -358,7 +348,7 @@ int envia_buffer_protocolado(int soquete, uint8_t tipo_msg, const uint8_t *buffe
         return ERRO;
     }
 
-    printf("[DEBUG] Transmissão em blocos finalizada\n");
+    log_evento("transmissao em blocos finalizada");
 
     return SUCESSO;
 }
