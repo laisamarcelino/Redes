@@ -10,6 +10,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
 
 /* ===================================================================
                          FUNÇÕES AUXILIARES
@@ -238,6 +240,173 @@ static int recebe_mapa_completo(int soquete)
     }
 }
 
+#define TIMEOUT_ARQUIVO_MS 2000
+
+// Abre o arquivo com o programa padrao do sistema sem bloquear o jogo.
+static void abre_arquivo_externo(const char *caminho)
+{
+    pid_t pid = fork();
+    if (pid == 0)
+    {
+        execlp("xdg-open", "xdg-open", caminho, (char *)NULL);
+        _exit(1);
+    }
+    // Processo pai continua sem esperar o filho
+}
+
+// Exibe arquivo de texto no terminal; jpg/mp4 salva em disco e abre com xdg-open.
+static void exibe_arquivo_recebido(uint8_t tipo, const uint8_t *buffer, size_t tamanho)
+{
+    if (tipo == MSG_TXT)
+    {
+        printf("\n=== Arquivo recebido (texto) ===\n");
+        fwrite(buffer, 1, tamanho, stdout);
+        printf("================================\n");
+        return;
+    }
+
+    const char *ext = (tipo == MSG_JPG) ? "jpg" : "mp4";
+    char caminho[64];
+
+    for (int i = 1; i <= 999; i++)
+    {
+        snprintf(caminho, sizeof(caminho), "premio_%03d.%s", i, ext);
+
+        FILE *teste = fopen(caminho, "rb");
+        if (teste != NULL) { fclose(teste); continue; }
+
+        FILE *f = fopen(caminho, "wb");
+        if (f == NULL) { perror("fopen premio"); return; }
+        if (tamanho > 0) fwrite(buffer, 1, tamanho, f);
+        fclose(f);
+
+        printf("\n=== Premio salvo em: %s — abrindo... ===\n", caminho);
+        abre_arquivo_externo(caminho);
+        return;
+    }
+
+    fprintf(stderr, "[AVISO] Nao foi possivel salvar o arquivo de premio\n");
+}
+
+/*
+ * Tenta receber um arquivo enviado pelo servidor logo apos o mapa.
+ * Aguarda o primeiro pacote com timeout; se nao chegar nada, retorna
+ * sem bloquear o proximo comando do usuario.
+ */
+static void recebe_arquivo_se_disponivel(int soquete)
+{
+    uint8_t pacote[TAMANHO_MAX_PACOTE];
+    mensagem_t mensagem;
+    uint8_t sequencia_esperada = 0;
+    uint8_t *buffer = NULL;
+    size_t tamanho = 0;
+    size_t capacidade = 0;
+    uint8_t tipo_atual = MSG_DADOS;
+    int recebendo = 0;
+
+    while (1)
+    {
+        ssize_t recebido;
+
+        if (!recebendo)
+        {
+            recebido = espera_mensagem_timeout(
+                soquete,
+                pacote,
+                sizeof(pacote),
+                TIMEOUT_ARQUIVO_MS);
+
+            if (recebido == REDE_TIMEOUT || recebido <= 0)
+                return;
+        }
+        else
+        {
+            recebido = espera_mensagem_servidor(soquete, pacote, sizeof(pacote));
+
+            if (recebido < 0)
+            {
+                if (errno == EINTR) continue;
+                free(buffer);
+                return;
+            }
+
+            if (recebido == 0) continue;
+        }
+
+        if (desmonta_pacote(pacote, (size_t)recebido, &mensagem) != 0)
+        {
+            if ((size_t)recebido >= TAMANHO_CABECALHO_PROTOCOLO &&
+                pacote[0] == MARCADOR_INICIO)
+            {
+                envia_ack_nack(
+                    soquete,
+                    MSG_NACK,
+                    extrai_sequencia_pacote_bruto(pacote));
+            }
+            continue;
+        }
+
+        if (mensagem.num_sequencia_msg ==
+            calcula_sequencia_anterior(sequencia_esperada))
+        {
+            envia_ack_nack(soquete, MSG_ACK, mensagem.num_sequencia_msg);
+            continue;
+        }
+
+        if (mensagem.num_sequencia_msg != sequencia_esperada)
+        {
+            envia_ack_nack(soquete, MSG_NACK, mensagem.num_sequencia_msg);
+            continue;
+        }
+
+        // Primeiro pacote deve ser de arquivo; qualquer outro tipo cancela
+        if (!recebendo &&
+            mensagem.tipo_msg != MSG_TXT &&
+            mensagem.tipo_msg != MSG_JPG &&
+            mensagem.tipo_msg != MSG_MP4)
+        {
+            return;
+        }
+
+        if (mensagem.tipo_msg == MSG_FIM_TRANSMISSAO)
+        {
+            envia_ack_nack(soquete, MSG_ACK, mensagem.num_sequencia_msg);
+
+            if (buffer != NULL)
+                exibe_arquivo_recebido(tipo_atual, buffer, tamanho);
+
+            free(buffer);
+            return;
+        }
+
+        tipo_atual = mensagem.tipo_msg;
+        recebendo = 1;
+
+        if (tamanho + mensagem.tamanho_dados > capacidade)
+        {
+            size_t nova = (capacidade == 0) ? 256 : capacidade;
+            while (tamanho + mensagem.tamanho_dados > nova) nova *= 2;
+
+            uint8_t *nb = realloc(buffer, nova);
+            if (nb == NULL)
+            {
+                fprintf(stderr, "[ERRO] Falha ao alocar buffer do arquivo\n");
+                free(buffer);
+                return;
+            }
+
+            buffer = nb;
+            capacidade = nova;
+        }
+
+        memcpy(buffer + tamanho, mensagem.dados, mensagem.tamanho_dados);
+        tamanho += mensagem.tamanho_dados;
+
+        envia_ack_nack(soquete, MSG_ACK, mensagem.num_sequencia_msg);
+        sequencia_esperada = calcula_proxima_sequencia(sequencia_esperada);
+    }
+}
+
 /* ===================================================================
                          FUNÇÕES PRINCIPAIS
 ======================================================================*/
@@ -305,7 +474,9 @@ int executa_cliente(int soquete, const char *mensagem)
             return -1;
         }
 
-        return recebe_mapa_completo(soquete);
+        int resultado = recebe_mapa_completo(soquete);
+        recebe_arquivo_se_disponivel(soquete);
+        return resultado;
     }
 
     // Envia a mensagem em blocos, trata ACK, NACK e timeout.

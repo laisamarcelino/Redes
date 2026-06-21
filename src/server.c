@@ -345,6 +345,55 @@ static int envia_mapa_completo(int soquete, const jogo_t *jogo)
         &proxima_sequencia);
 }
 
+// Mapeia o simbolo da pastilha para o caminho e tipo do arquivo de premio.
+static int caminho_arquivo_pastilha(char simbolo, const char **caminho, uint8_t *tipo)
+{
+    switch (simbolo)
+    {
+    case LAB_PASTILHA_TXT_1: *caminho = "pastilhas/1.txt"; *tipo = MSG_TXT; return 0;
+    case LAB_PASTILHA_TXT_2: *caminho = "pastilhas/2.txt"; *tipo = MSG_TXT; return 0;
+    case LAB_PASTILHA_JPG_3: *caminho = "pastilhas/3.jpg"; *tipo = MSG_JPG; return 0;
+    case LAB_PASTILHA_JPG_4: *caminho = "pastilhas/4.jpg"; *tipo = MSG_JPG; return 0;
+    case LAB_PASTILHA_MP4_5: *caminho = "pastilhas/5.mp4"; *tipo = MSG_MP4; return 0;
+    case LAB_PASTILHA_MP4_6: *caminho = "pastilhas/6.mp4"; *tipo = MSG_MP4; return 0;
+    default: return -1;
+    }
+}
+
+// Envia o arquivo de premio da pastilha coletada e zera o campo no jogo.
+static int envia_premio(int soquete, jogo_t *jogo)
+{
+    const char *caminho = NULL;
+    uint8_t tipo = MSG_DADOS;
+    uint8_t seq = 0;
+
+    if (jogo->ultima_pastilha_coletada == 0)
+        return 0;
+
+    if (caminho_arquivo_pastilha(
+            (char)jogo->ultima_pastilha_coletada,
+            &caminho,
+            &tipo) != 0)
+    {
+        jogo->ultima_pastilha_coletada = 0;
+        return 0;
+    }
+
+    jogo->ultima_pastilha_coletada = 0;
+    return envia_arquivo_protocolado(soquete, caminho, tipo, &seq);
+}
+
+// Envia o arquivo de colisao quando o PacMan encontra um fantasma.
+static int envia_arquivo_colisao(int soquete)
+{
+    uint8_t seq = 0;
+    return envia_arquivo_protocolado(
+        soquete,
+        "pastilhas/colisao.txt",
+        MSG_TXT,
+        &seq);
+}
+
 /* ===================================================================
                          FUNÇÕES PRINCIPAIS
 ======================================================================*/
@@ -564,6 +613,17 @@ int executa_servidor(int soquete)
             {
                 free(buffer_recebido);
                 return -1;
+            }
+
+            // Colisao com fantasma tem prioridade sobre premio de pastilha
+            if (jogo.terminou && !jogo.venceu)
+            {
+                jogo.ultima_pastilha_coletada = 0;
+                envia_arquivo_colisao(soquete);
+            }
+            else if (jogo.ultima_pastilha_coletada != 0)
+            {
+                envia_premio(soquete, &jogo);
             }
 
             sequencia_esperada = 0;
