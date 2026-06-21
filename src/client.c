@@ -175,7 +175,7 @@ static int recebe_mapa_completo(int soquete)
             continue;
         }
 
-        log_mensagem("RECV", &mensagem);
+        log_mensagem("SRV", &mensagem);
 
         if (mensagem.num_sequencia_msg ==
             calcula_sequencia_anterior(sequencia_esperada))
@@ -341,7 +341,7 @@ static void recebe_arquivo_se_disponivel(int soquete)
             continue;
         }
 
-        log_mensagem("RECV", &mensagem);
+        log_mensagem("SRV", &mensagem);
 
         if (mensagem.num_sequencia_msg ==
             calcula_sequencia_anterior(sequencia_esperada))
@@ -430,7 +430,7 @@ static int recebe_fim_jogo(int soquete)
             continue;
         }
 
-        log_mensagem("RECV", &mensagem);
+        log_mensagem("SRV", &mensagem);
 
         if (mensagem.tipo_msg != MSG_FIM_JOGO) continue;
 

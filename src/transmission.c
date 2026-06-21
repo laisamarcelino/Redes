@@ -12,6 +12,16 @@
 #define SUCESSO 0
 #define ERRO -1
 
+static const char *label_proprio(void)
+{
+    return log_get_contexto();
+}
+
+static const char *label_outro(void)
+{
+    return (log_get_contexto()[0] == 'S') ? "CLI" : "SRV";
+}
+
 /* ===================================================================
                          FUNÇÕES PRINCIPAIS
 ======================================================================*/
@@ -67,7 +77,7 @@ int envia_ack_nack(int soquete, uint8_t tipo_resposta, uint8_t sequencia)
     log_ctrl.tipo_msg          = tipo_resposta;
     log_ctrl.num_sequencia_msg = sequencia;
     log_ctrl.tamanho_dados     = 0;
-    log_mensagem("SRV", &log_ctrl);
+    log_mensagem(label_proprio(), &log_ctrl);
 
     return SUCESSO;
 }
@@ -137,13 +147,14 @@ int espera_ack_nack_com_timeout(int soquete, uint8_t sequencia_esperada)
         // ACK confirma o pacote enviado
         if (resposta.tipo_msg == MSG_ACK)
         {
+            log_mensagem(label_outro(), &resposta);
             return MSG_ACK;
         }
 
         // NACK pede reenvio do pacote
         if (resposta.tipo_msg == MSG_NACK)
         {
-            log_evento("ERRO CLI NACK seq=%02u", resposta.num_sequencia_msg);
+            log_mensagem(label_outro(), &resposta);
             return MSG_NACK;
         }
 
@@ -203,10 +214,11 @@ int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem, uint8_t *proxima
         memcpy(pacote_envio, pacote, tamanho_pacote);
 
         if (tentativa == 1)
-            log_mensagem("SRV", mensagem);
+            log_mensagem(label_proprio(), mensagem);
         else
-            log_evento("ERRO SRV reenvio seq=%02u tentativa %d/%d",
-                       mensagem->num_sequencia_msg, tentativa, MAX_TENTATIVAS_ENVIO);
+            log_evento("ERRO %s reenvio seq=%02u tentativa %d/%d",
+                       label_proprio(), mensagem->num_sequencia_msg,
+                       tentativa, MAX_TENTATIVAS_ENVIO);
 
         // Envia o pacote pela camada de rede
         ssize_t enviado = envia_mensagem(
@@ -252,8 +264,8 @@ int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem, uint8_t *proxima
         // NACK faz repetir a mesma sequencia
         if (resposta == MSG_NACK)
         {
-            log_evento("ERRO CLI NACK seq=%02u, reenviando",
-                       mensagem->num_sequencia_msg);
+            log_evento("ERRO %s NACK seq=%02u, reenviando",
+                       label_outro(), mensagem->num_sequencia_msg);
             continue;
         }
 

@@ -22,6 +22,11 @@ void log_define_contexto(const char *ctx)
     log_contexto[i] = '\0';
 }
 
+const char *log_get_contexto(void)
+{
+    return log_contexto;
+}
+
 static const char *nome_tipo(uint8_t tipo)
 {
     switch (tipo)
