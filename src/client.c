@@ -12,6 +12,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 
 /* ===================================================================
                          FUNÇÕES AUXILIARES
@@ -252,38 +253,50 @@ static void abre_arquivo_externo(const char *caminho)
     // Processo pai continua sem esperar o filho
 }
 
-// Exibe arquivo de texto no terminal; jpg/mp4 salva em disco e abre com xdg-open.
-static void exibe_arquivo_recebido(uint8_t tipo, const uint8_t *buffer, size_t tamanho)
+#define PASTA_RECEBIDOS "recebidos"
+
+// Salva o buffer em recebidos/premio_NNN.ext e preenche caminho com o nome usado.
+static int salva_em_recebidos(const uint8_t *buffer, size_t tamanho,
+                              const char *ext, char *caminho, size_t tam_caminho)
 {
-    if (tipo == MSG_TXT)
-    {
-        printf("\n=== Arquivo recebido (texto) ===\n");
-        fwrite(buffer, 1, tamanho, stdout);
-        printf("================================\n");
-        return;
-    }
-
-    const char *ext = (tipo == MSG_JPG) ? "jpg" : "mp4";
-    char caminho[64];
-
     for (int i = 1; i <= 999; i++)
     {
-        snprintf(caminho, sizeof(caminho), "premio_%03d.%s", i, ext);
+        snprintf(caminho, tam_caminho, "%s/premio_%03d.%s", PASTA_RECEBIDOS, i, ext);
 
         FILE *teste = fopen(caminho, "rb");
         if (teste != NULL) { fclose(teste); continue; }
 
         FILE *f = fopen(caminho, "wb");
-        if (f == NULL) { perror("fopen premio"); return; }
+        if (f == NULL) { perror("fopen premio"); return -1; }
         if (tamanho > 0) fwrite(buffer, 1, tamanho, f);
         fclose(f);
-
-        printf("\n=== Premio salvo em: %s — abrindo... ===\n", caminho);
-        abre_arquivo_externo(caminho);
-        return;
+        return 0;
     }
 
     fprintf(stderr, "[AVISO] Nao foi possivel salvar o arquivo de premio\n");
+    return -1;
+}
+
+// Salva o arquivo recebido em recebidos/ e exibe ou abre conforme o tipo.
+static void exibe_arquivo_recebido(uint8_t tipo, const uint8_t *buffer, size_t tamanho)
+{
+    const char *ext = (tipo == MSG_TXT) ? "txt" : (tipo == MSG_JPG) ? "jpg" : "mp4";
+    char caminho[128];
+
+    if (salva_em_recebidos(buffer, tamanho, ext, caminho, sizeof(caminho)) != 0)
+        return;
+
+    if (tipo == MSG_TXT)
+    {
+        printf("\n=== Premio recebido (texto) — salvo em %s ===\n", caminho);
+        fwrite(buffer, 1, tamanho, stdout);
+        printf("\n=============================================\n");
+    }
+    else
+    {
+        printf("\n=== Premio salvo em: %s — abrindo... ===\n", caminho);
+        abre_arquivo_externo(caminho);
+    }
 }
 
 /*
