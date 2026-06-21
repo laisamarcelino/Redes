@@ -34,9 +34,9 @@ typedef enum
     MSG_MOV_ESQUERDA = 11,
     MSG_MOV_CIMA = 12,
     MSG_MOV_BAIXO = 13,
+    MSG_FIM_JOGO = 8,   // payload[0]: 0=continua 1=vitoria 2=derrota
     MSG_ERRO = 15,
-    MSG_FIM_TRANSMISSAO = 16,
-    MSG_FIM_JOGO = 17   // payload[0]: 0=continua 1=vitoria 2=derrota
+    MSG_FIM_TRANSMISSAO = 16
 } tipo_msg_t;
 
 /*

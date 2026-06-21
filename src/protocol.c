@@ -25,6 +25,7 @@ static int tipo_msg_valido(uint8_t tipo_msg)
     case MSG_MOV_ESQUERDA:
     case MSG_MOV_CIMA:
     case MSG_MOV_BAIXO:
+    case MSG_FIM_JOGO:
     case MSG_ERRO:
     case MSG_FIM_TRANSMISSAO:
         return 1;
