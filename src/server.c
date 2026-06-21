@@ -440,7 +440,7 @@ static int envia_resposta_completa(int soquete, jogo_t *jogo)
  * Inicializa o jogo, recebe pacotes do cliente, valida sequencia/CRC, trata
  * pedidos de mapa, movimentos, arquivos e mensagens comuns, e envia ACK/NACK
  */
-int executa_servidor(int soquete)
+int executa_servidor(int soquete, const char *caminho_mapa)
 {
     // Buffer que recebe um pacote PacMan ja sem cabecalho Ethernet
     uint8_t pacote[TAMANHO_MAX_PACOTE];
@@ -452,7 +452,10 @@ int executa_servidor(int soquete)
     uint8_t tipo_transmissao_atual = MSG_DADOS;
     jogo_t jogo;
 
-    if (carrega_mapa_csv(&jogo, CAMINHO_MAPA_PADRAO) != 0)
+    const char *mapa = (caminho_mapa != NULL) ? caminho_mapa : CAMINHO_MAPA_PADRAO;
+    printf("Carregando mapa: %s\n", mapa);
+
+    if (carrega_mapa_csv(&jogo, mapa) != 0)
     {
         return -1;
     }

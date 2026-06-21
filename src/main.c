@@ -12,7 +12,7 @@
 // Mostra a forma correta de uso do programa.
 static void mostra_uso(const char *programa) {
     fprintf(stderr, "Uso:\n");
-    fprintf(stderr, "  %s -s [-l] [-i interface]\n", programa);
+    fprintf(stderr, "  %s -s [-m mapa.csv] [-l] [-i interface]\n", programa);
     fprintf(stderr, "  %s -c mapa [-l] [-i interface]\n", programa);
     fprintf(stderr, "  %s -c cima|baixo|esquerda|direita [-l] [-i interface]\n", programa);
     fprintf(stderr, "  %s -c \"mensagem\" [-l] [-i interface]\n", programa);
@@ -20,6 +20,7 @@ static void mostra_uso(const char *programa) {
     fprintf(stderr, "\nOpcoes:\n");
     fprintf(stderr, "  -c  modo cliente, enviando a mensagem informada\n");
     fprintf(stderr, "  -s  modo servidor\n");
+    fprintf(stderr, "  -m  caminho do mapa CSV (padrao: maps/padrao_ufpr.csv)\n");
     fprintf(stderr, "  -l  permite loopback para testes locais\n");
     fprintf(stderr, "  -i  escolhe manualmente a interface de rede. Ex: enp3s0, eth0, lo\n");
     fprintf(stderr, "\nArquivos suportados: .txt, .jpg, .jpeg e .mp4\n");
@@ -32,6 +33,7 @@ int main(int argc, char **argv) {
     int permite_loopback = 0;
     char *mensagem_cliente = NULL;
     char *interface_manual = NULL;
+    char *caminho_mapa = NULL;
 
     int opcao;
     /*
@@ -39,7 +41,7 @@ int main(int argc, char **argv) {
      * Se quiser da pra tirar pois no meu PC ta indo automaticamente, e vamos apresentar neles
      * Isso evita selecionar Docker, bridge, VPN ou outra interface errada.
      */
-    while ((opcao = getopt(argc, argv, "c:si:lh")) != -1) {
+    while ((opcao = getopt(argc, argv, "c:si:lhm:")) != -1) {
         switch (opcao) {
             case 'c':
                 modo_cliente = 1;
@@ -47,6 +49,9 @@ int main(int argc, char **argv) {
                 break;
             case 's':
                 modo_servidor = 1;
+                break;
+            case 'm':
+                caminho_mapa = optarg;
                 break;
             case 'i':
                 interface_manual = optarg;
@@ -100,7 +105,7 @@ int main(int argc, char **argv) {
     if (modo_cliente) {
         resultado = executa_cliente(soquete, mensagem_cliente);
     } else {
-        resultado = executa_servidor(soquete);
+        resultado = executa_servidor(soquete, caminho_mapa);
     }
 
     fecha_raw_socket(soquete);

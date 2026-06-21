@@ -1,0 +1,1 @@
+Oh nao! O PacMan foi pego por um fantasma! Game Over.
