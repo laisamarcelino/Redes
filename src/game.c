@@ -472,10 +472,21 @@ int gera_visualizacao(const jogo_t *jogo, char *saida, size_t capacidade, size_t
         return ERRO;
     }
 
+    int px    = jogo->pacman.posicao_x;
+    int py    = jogo->pacman.posicao_y;
+    int raio  = jogo->raio_visao;
+
     for (int x = 0; x < LINHAS; x++)
     {
         for (int y = 0; y < COLUNAS; y++)
         {
+            // Celulas fora do raio de visao aparecem como escuridao
+            if (abs(x - px) > raio || abs(y - py) > raio)
+            {
+                saida[usado++] = ' ';
+                continue;
+            }
+
             char simbolo = jogo->mapa[x][y];
 
             if (entidade_ocupa_posicao(&jogo->pacman, x, y))
