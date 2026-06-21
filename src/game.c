@@ -451,6 +451,59 @@ int posiciona_entidades_no_mapa(jogo_t *jogo)
     return SUCESSO;
 }
 
+/*
+ * Escreve a sequencia ANSI colorida de uma celula no buffer `saida` a partir
+ * da posicao `usado` e retorna o novo valor de `usado`.
+ *
+ * Paleta:
+ *   Parede       \033[1;37m + █ (U+2588, branco brilhante)
+ *   PacMan       \033[1;33m + P  (amarelo brilhante)
+ *   Fantasma R   \033[31m   + R  (vermelho)
+ *   Fantasma B   \033[34m   + B  (azul)
+ *   Fantasma G   \033[32m   + G  (verde)
+ *   Fantasma Y   \033[33m   + Y  (amarelo escuro)
+ *   Pastilhas    \033[1;33m + ● (U+25CF, dourado)
+ *   Vazio/bruma  espaco simples
+ */
+static size_t escreve_celula_colorida(char *saida, size_t usado, char simbolo)
+{
+    const char *cor;
+    const char *texto;
+    const char *r;
+
+    switch (simbolo)
+    {
+    case LAB_PAREDE:
+        cor = "\033[1;37m"; texto = "\xe2\x96\x88"; break;
+    case LAB_PACMAN:
+        cor = "\033[1;33m"; texto = "P";             break;
+    case LAB_FANTASMA_VERMELHO:
+        cor = "\033[31m";   texto = "R";             break;
+    case LAB_FANTASMA_AZUL:
+        cor = "\033[34m";   texto = "B";             break;
+    case LAB_FANTASMA_VERDE:
+        cor = "\033[32m";   texto = "G";             break;
+    case LAB_FANTASMA_AMARELO:
+        cor = "\033[33m";   texto = "Y";             break;
+    case LAB_PASTILHA_TXT_1:
+    case LAB_PASTILHA_TXT_2:
+    case LAB_PASTILHA_JPG_3:
+    case LAB_PASTILHA_JPG_4:
+    case LAB_PASTILHA_MP4_5:
+    case LAB_PASTILHA_MP4_6:
+        cor = "\033[1;33m"; texto = "\xe2\x97\x8f"; break;
+    default:
+        saida[usado++] = ' ';
+        return usado;
+    }
+
+    for (r = cor;       *r; r++) saida[usado++] = *r;
+    for (r = texto;     *r; r++) saida[usado++] = *r;
+    for (r = "\033[0m"; *r; r++) saida[usado++] = *r;
+
+    return usado;
+}
+
 /* APAGAR
  * Gera uma representacao textual completa do mapa atual.
  * O mapa base vem de jogo->mapa, mas entidades ativas aparecem por cima das
@@ -466,7 +519,7 @@ int gera_visualizacao(const jogo_t *jogo, char *saida, size_t capacidade, size_t
         return ERRO;
     }
 
-    if (capacidade < (LINHAS * (COLUNAS + 1)) + 1)
+    if (capacidade < JOGO_VISUALIZACAO_MAX)
     {
         fprintf(stderr, "[ERRO] Buffer pequeno demais para visualizacao do mapa.\n");
         return ERRO;
@@ -511,7 +564,7 @@ int gera_visualizacao(const jogo_t *jogo, char *saida, size_t capacidade, size_t
                 }
             }
 
-            saida[usado++] = simbolo;
+            usado = escreve_celula_colorida(saida, usado, simbolo);
         }
 
         saida[usado++] = '\n';

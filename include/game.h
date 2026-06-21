@@ -10,8 +10,10 @@
 #define TOTAL_PASTILHAS 6
 #define RAIO_INICIAL 1
 
-/* Limite para montar uma visualizacao textual completa do mapa. */
-#define JOGO_VISUALIZACAO_MAX 4096
+/* Limite para montar uma visualizacao textual completa do mapa.
+ * Com ANSI + UTF-8 (ex: \033[1;37m + █(3 bytes) + \033[0m) cada celula usa
+ * ate 15 bytes: 40*40*15 + 40 newlines + null = ~24041 bytes. */
+#define JOGO_VISUALIZACAO_MAX 32768
 
 /* Simbolos aceitos no arquivo CSV e usados internamente pelo jogo. */
 typedef enum {
