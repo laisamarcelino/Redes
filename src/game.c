@@ -533,10 +533,11 @@ int gera_visualizacao(const jogo_t *jogo, char *saida, size_t capacidade, size_t
     {
         for (int y = 0; y < COLUNAS; y++)
         {
-            // Celulas fora do raio de visao aparecem como escuridao
+            // Celulas fora do raio de visao aparecem como nevoa
             if (abs(x - px) > raio || abs(y - py) > raio)
             {
-                saida[usado++] = ' ';
+                const char *nevoa = "\033[90m\xe2\x96\x91\033[0m";
+                for (const char *r = nevoa; *r; r++) saida[usado++] = *r;
                 continue;
             }
 
