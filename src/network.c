@@ -306,7 +306,9 @@ ssize_t espera_mensagem_servidor(int soquete, unsigned char *buffer, size_t tama
 
         if (recebido < 0)
         {
-            if (errno == EINTR || errno == ENETDOWN || errno == ENETUNREACH)
+            if (errno == EINTR   || errno == ENETDOWN  ||
+                errno == ENETUNREACH || errno == ENXIO ||
+                errno == ENOBUFS)
                 continue;
             return -1;
         }
@@ -548,7 +550,9 @@ ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
         // Trata timeout, interrupcao e erro de rede
         if (recebido < 0)
         {
-            if (errno == EINTR || errno == ENETDOWN || errno == ENETUNREACH)
+            if (errno == EINTR   || errno == ENETDOWN  ||
+                errno == ENETUNREACH || errno == ENXIO ||
+                errno == ENOBUFS)
             {
                 continue;
             }

@@ -217,7 +217,9 @@ int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem, uint8_t *proxima
 
         if (enviado < 0)
         {
-            if (errno == EINTR || errno == ENETDOWN || errno == ENETUNREACH)
+            if (errno == EINTR   || errno == ENETDOWN  ||
+                errno == ENETUNREACH || errno == ENXIO ||
+                errno == ENOBUFS)
             {
                 tentativa++;
                 continue;
