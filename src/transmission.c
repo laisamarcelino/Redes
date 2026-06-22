@@ -217,8 +217,11 @@ int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem, uint8_t *proxima
 
         if (enviado < 0)
         {
-            if (errno == EINTR)
+            if (errno == EINTR || errno == ENETDOWN || errno == ENETUNREACH)
+            {
+                tentativa++;
                 continue;
+            }
 
             perror("envia_mensagem");
             return ERRO;

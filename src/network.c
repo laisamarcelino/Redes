@@ -304,10 +304,15 @@ ssize_t espera_mensagem_servidor(int soquete, unsigned char *buffer, size_t tama
                                     (struct sockaddr *)&endereco_origem,
                                     &tamanho_endereco);
 
-        if (recebido <= 0)
+        if (recebido < 0)
         {
-            return recebido;
+            if (errno == EINTR || errno == ENETDOWN || errno == ENETUNREACH)
+                continue;
+            return -1;
         }
+
+        if (recebido == 0)
+            return 0;
 
         // Ignora cópias locais do próprio pacote enviado
         if (endereco_origem.sll_pkttype == PACKET_OUTGOING)
@@ -543,7 +548,7 @@ ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
         // Trata timeout, interrupcao e erro de rede
         if (recebido < 0)
         {
-            if (errno == EINTR)
+            if (errno == EINTR || errno == ENETDOWN || errno == ENETUNREACH)
             {
                 continue;
             }
