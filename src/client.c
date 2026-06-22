@@ -87,7 +87,7 @@ static int acumula_fragmento(uint8_t **buffer, size_t *tamanho_atual,
 }
 
 // Monta e envia uma mensagem de inicializacao para pedir ao servidor o mapa atual
-static int envia_pedido_mapa(int soquete)
+static int envia_pedido_mapa(int *p_soquete)
 {
     mensagem_t mensagem;
 
@@ -96,7 +96,7 @@ static int envia_pedido_mapa(int soquete)
     mensagem.tamanho_dados = 0;
 
     return envia_pacote_com_reenvio(
-        soquete,
+        p_soquete,
         &mensagem,
         &proxima_sequencia_cliente);
 }
@@ -107,7 +107,7 @@ static int envia_pedido_mapa(int soquete)
  * MSG_MOV_ESQUERDA ou MSG_MOV_DIREITA.
  */
 // Envia uma jogada de movimento do PacMan ao servidor.
-static int envia_movimento_pacman(int soquete, uint8_t tipo_movimento)
+static int envia_movimento_pacman(int *p_soquete, uint8_t tipo_movimento)
 {
     mensagem_t mensagem;
 
@@ -116,7 +116,7 @@ static int envia_movimento_pacman(int soquete, uint8_t tipo_movimento)
     mensagem.tamanho_dados = 0;
 
     return envia_pacote_com_reenvio(
-        soquete,
+        p_soquete,
         &mensagem,
         &proxima_sequencia_cliente);
 }
@@ -126,7 +126,7 @@ static int envia_movimento_pacman(int soquete, uint8_t tipo_movimento)
  * pacote com ACK e imprime o mapa remontado ao final da transmissao.
  */
 // Recebe a visualizacao enviada pelo servidor e imprime o mapa completo.
-static int recebe_mapa_completo(int soquete)
+static int recebe_mapa_completo(int *p_soquete)
 {
     uint8_t pacote[TAMANHO_MAX_PACOTE];
     mensagem_t mensagem;
@@ -138,7 +138,7 @@ static int recebe_mapa_completo(int soquete)
     while (1)
     {
         ssize_t recebido = espera_mensagem_servidor(
-            soquete,
+            p_soquete,
             pacote,
             sizeof(pacote));
 
@@ -167,7 +167,7 @@ static int recebe_mapa_completo(int soquete)
                 pacote[0] == MARCADOR_INICIO)
             {
                 envia_ack_nack(
-                    soquete,
+                    *p_soquete,
                     MSG_NACK,
                     extrai_sequencia_pacote_bruto(pacote));
             }
@@ -181,7 +181,7 @@ static int recebe_mapa_completo(int soquete)
             calcula_sequencia_anterior(sequencia_esperada))
         {
             envia_ack_nack(
-                soquete,
+                *p_soquete,
                 MSG_ACK,
                 mensagem.num_sequencia_msg);
             continue;
@@ -190,7 +190,7 @@ static int recebe_mapa_completo(int soquete)
         if (mensagem.num_sequencia_msg != sequencia_esperada)
         {
             envia_ack_nack(
-                soquete,
+                *p_soquete,
                 MSG_NACK,
                 mensagem.num_sequencia_msg);
             continue;
@@ -212,7 +212,7 @@ static int recebe_mapa_completo(int soquete)
             sequencia_esperada = calcula_proxima_sequencia(sequencia_esperada);
 
             envia_ack_nack(
-                soquete,
+                *p_soquete,
                 MSG_ACK,
                 mensagem.num_sequencia_msg);
 
@@ -222,7 +222,7 @@ static int recebe_mapa_completo(int soquete)
         if (mensagem.tipo_msg == MSG_FIM_TRANSMISSAO)
         {
             envia_ack_nack(
-                soquete,
+                *p_soquete,
                 MSG_ACK,
                 mensagem.num_sequencia_msg);
 
@@ -238,7 +238,7 @@ static int recebe_mapa_completo(int soquete)
         fprintf(stderr, "[ERRO] Tipo inesperado ao receber mapa: %u\n",
                 mensagem.tipo_msg);
         envia_ack_nack(
-            soquete,
+            *p_soquete,
             MSG_NACK,
             mensagem.num_sequencia_msg);
     }
@@ -307,7 +307,7 @@ static void exibe_arquivo_recebido(uint8_t tipo, const uint8_t *buffer, size_t t
  * O servidor garante enviar sempre algo (arquivo ou FIM_TRANSMISSAO vazio),
  * portanto nao e necessario timeout — usa recebimento bloqueante direto.
  */
-static void recebe_arquivo_se_disponivel(int soquete)
+static void recebe_arquivo_se_disponivel(int *p_soquete)
 {
     uint8_t pacote[TAMANHO_MAX_PACOTE];
     mensagem_t mensagem;
@@ -319,7 +319,7 @@ static void recebe_arquivo_se_disponivel(int soquete)
 
     while (1)
     {
-        ssize_t recebido = espera_mensagem_servidor(soquete, pacote, sizeof(pacote));
+        ssize_t recebido = espera_mensagem_servidor(p_soquete, pacote, sizeof(pacote));
 
         if (recebido < 0)
         {
@@ -335,7 +335,7 @@ static void recebe_arquivo_se_disponivel(int soquete)
             if ((size_t)recebido >= TAMANHO_CABECALHO_PROTOCOLO &&
                 pacote[0] == MARCADOR_INICIO)
             {
-                envia_ack_nack(soquete, MSG_NACK,
+                envia_ack_nack(*p_soquete, MSG_NACK,
                                extrai_sequencia_pacote_bruto(pacote));
             }
             continue;
@@ -346,20 +346,20 @@ static void recebe_arquivo_se_disponivel(int soquete)
         if (mensagem.num_sequencia_msg ==
             calcula_sequencia_anterior(sequencia_esperada))
         {
-            envia_ack_nack(soquete, MSG_ACK, mensagem.num_sequencia_msg);
+            envia_ack_nack(*p_soquete, MSG_ACK, mensagem.num_sequencia_msg);
             continue;
         }
 
         if (mensagem.num_sequencia_msg != sequencia_esperada)
         {
-            envia_ack_nack(soquete, MSG_NACK, mensagem.num_sequencia_msg);
+            envia_ack_nack(*p_soquete, MSG_NACK, mensagem.num_sequencia_msg);
             continue;
         }
 
         // FIM_TRANSMISSAO: fim do arquivo (ou sinal de "sem arquivo")
         if (mensagem.tipo_msg == MSG_FIM_TRANSMISSAO)
         {
-            envia_ack_nack(soquete, MSG_ACK, mensagem.num_sequencia_msg);
+            envia_ack_nack(*p_soquete, MSG_ACK, mensagem.num_sequencia_msg);
             if (buffer != NULL)
                 exibe_arquivo_recebido(tipo_atual, buffer, tamanho);
             free(buffer);
@@ -371,7 +371,7 @@ static void recebe_arquivo_se_disponivel(int soquete)
             mensagem.tipo_msg != MSG_JPG &&
             mensagem.tipo_msg != MSG_MP4)
         {
-            envia_ack_nack(soquete, MSG_NACK, mensagem.num_sequencia_msg);
+            envia_ack_nack(*p_soquete, MSG_NACK, mensagem.num_sequencia_msg);
             free(buffer);
             return;
         }
@@ -398,20 +398,20 @@ static void recebe_arquivo_se_disponivel(int soquete)
         memcpy(buffer + tamanho, mensagem.dados, mensagem.tamanho_dados);
         tamanho += mensagem.tamanho_dados;
 
-        envia_ack_nack(soquete, MSG_ACK, mensagem.num_sequencia_msg);
+        envia_ack_nack(*p_soquete, MSG_ACK, mensagem.num_sequencia_msg);
         sequencia_esperada = calcula_proxima_sequencia(sequencia_esperada);
     }
 }
 
 // Recebe o pacote MSG_FIM_JOGO e retorna o status: 0=continua 1=vitoria 2=derrota.
-static int recebe_fim_jogo(int soquete)
+static int recebe_fim_jogo(int *p_soquete)
 {
     uint8_t pacote[TAMANHO_MAX_PACOTE];
     mensagem_t mensagem;
 
     while (1)
     {
-        ssize_t recebido = espera_mensagem_servidor(soquete, pacote, sizeof(pacote));
+        ssize_t recebido = espera_mensagem_servidor(p_soquete, pacote, sizeof(pacote));
 
         if (recebido < 0)
         {
@@ -425,7 +425,7 @@ static int recebe_fim_jogo(int soquete)
         {
             if ((size_t)recebido >= TAMANHO_CABECALHO_PROTOCOLO &&
                 pacote[0] == MARCADOR_INICIO)
-                envia_ack_nack(soquete, MSG_NACK,
+                envia_ack_nack(*p_soquete, MSG_NACK,
                                extrai_sequencia_pacote_bruto(pacote));
             continue;
         }
@@ -434,7 +434,7 @@ static int recebe_fim_jogo(int soquete)
 
         if (mensagem.tipo_msg != MSG_FIM_JOGO) continue;
 
-        envia_ack_nack(soquete, MSG_ACK, mensagem.num_sequencia_msg);
+        envia_ack_nack(*p_soquete, MSG_ACK, mensagem.num_sequencia_msg);
 
         return (mensagem.tamanho_dados >= 1) ? (int)mensagem.dados[0] : 0;
     }
@@ -442,14 +442,14 @@ static int recebe_fim_jogo(int soquete)
 
 // Recebe arquivo (ou sinal vazio) seguido de MSG_FIM_JOGO.
 // Retorna: 0=continua 1=vitoria 2=derrota.
-static int recebe_resposta_completa(int soquete)
+static int recebe_resposta_completa(int *p_soquete)
 {
-    recebe_arquivo_se_disponivel(soquete);
-    return recebe_fim_jogo(soquete);
+    recebe_arquivo_se_disponivel(p_soquete);
+    return recebe_fim_jogo(p_soquete);
 }
 
 // Loop interativo: pede o mapa inicial e depois recebe movimentos do usuario.
-static int executa_jogo_interativo(int soquete)
+static int executa_jogo_interativo(int *p_soquete)
 {
     char entrada[64];
     int rodada = 0;
@@ -457,14 +457,14 @@ static int executa_jogo_interativo(int soquete)
     printf("Conectando ao servidor...\n");
 
     proxima_sequencia_cliente = 0;
-    if (envia_pedido_mapa(soquete) != 0)
+    if (envia_pedido_mapa(p_soquete) != 0)
         return -1;
 
     printf("\033[2J\033[H");
-    if (recebe_mapa_completo(soquete) != 0)
+    if (recebe_mapa_completo(p_soquete) != 0)
         return -1;
 
-    recebe_resposta_completa(soquete); // FIM_TRANSMISSAO vazio + FIM_JOGO=0
+    recebe_resposta_completa(p_soquete); // FIM_TRANSMISSAO vazio + FIM_JOGO=0
 
     while (1)
     {
@@ -487,16 +487,16 @@ static int executa_jogo_interativo(int soquete)
         }
 
         proxima_sequencia_cliente = 0; // servidor reinicia a sequencia apos cada resposta
-        if (envia_movimento_pacman(soquete, tipo) != 0)
+        if (envia_movimento_pacman(p_soquete, tipo) != 0)
             return -1;
 
         rodada++;
         printf("\033[2J\033[H");
 
-        if (recebe_mapa_completo(soquete) != 0)
+        if (recebe_mapa_completo(p_soquete) != 0)
             return -1;
 
-        int status = recebe_resposta_completa(soquete);
+        int status = recebe_resposta_completa(p_soquete);
 
         if (status == 1)
         {
@@ -553,7 +553,7 @@ int executa_cliente(int soquete, const char *mensagem)
         }
 
         return envia_arquivo_protocolado(
-            soquete,
+            &soquete,
             caminho,
             tipo,
             &proxima_sequencia_cliente);
@@ -564,38 +564,38 @@ int executa_cliente(int soquete, const char *mensagem)
      * envia MSG_INICIALIZACAO e aguarda o servidor responder com o mapa completo.
      */
     if (strcmp(mensagem, "jogar") == 0)
-        return executa_jogo_interativo(soquete);
+        return executa_jogo_interativo(&soquete);
 
     if (strcmp(mensagem, "mapa") == 0 || strcmp(mensagem, "iniciar") == 0)
     {
-        if (envia_pedido_mapa(soquete) != 0)
+        if (envia_pedido_mapa(&soquete) != 0)
         {
             return -1;
         }
 
-        if (recebe_mapa_completo(soquete) != 0)
+        if (recebe_mapa_completo(&soquete) != 0)
             return -1;
 
-        recebe_resposta_completa(soquete); // consome FIM_TRANSMISSAO + FIM_JOGO
+        recebe_resposta_completa(&soquete); // consome FIM_TRANSMISSAO + FIM_JOGO
         return 0;
     }
 
     tipo_movimento = tipo_movimento_por_texto(mensagem);
     if (tipo_movimento != MSG_ERRO)
     {
-        if (envia_movimento_pacman(soquete, tipo_movimento) != 0)
+        if (envia_movimento_pacman(&soquete, tipo_movimento) != 0)
         {
             return -1;
         }
 
-        int resultado = recebe_mapa_completo(soquete);
-        recebe_resposta_completa(soquete); // consome arquivo + FIM_JOGO
+        int resultado = recebe_mapa_completo(&soquete);
+        recebe_resposta_completa(&soquete); // consome arquivo + FIM_JOGO
         return resultado;
     }
 
     // Envia a mensagem em blocos, trata ACK, NACK e timeout.
     return envia_buffer_protocolado(
-        soquete,
+        &soquete,
         MSG_DADOS,
         (const uint8_t *)mensagem,
         strlen(mensagem),

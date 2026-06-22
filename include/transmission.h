@@ -6,19 +6,21 @@
 #include <stdint.h>
 
 #define TIMEOUT_ACK_MS 3000
+#define MAX_TENTATIVAS_REENVIO 10
 
 // Envia uma resposta de controle sem payload para confirmar ou negar um pacote.
 int envia_ack_nack(int soquete, uint8_t tipo_resposta, uint8_t sequencia);
 
 // Espera ACK ou NACK da sequencia informada ate estourar o timeout.
-int espera_ack_nack_com_timeout(int soquete, uint8_t sequencia_esperada);
+int espera_ack_nack_com_timeout(int *p_soquete, uint8_t sequencia_esperada);
 
 // Envia um pacote de dados e reenvia em caso de NACK ou timeout.
-int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem,
+// Cable-down nao conta para o limite; NACK e timeout contam (max MAX_TENTATIVAS_REENVIO).
+int envia_pacote_com_reenvio(int *p_soquete, mensagem_t *mensagem,
                              uint8_t *proxima_sequencia);
 
 // Envia um buffer grande, fragmentando em pacotes do protocolo e finalizando a transmissao.
-int envia_buffer_protocolado(int soquete, uint8_t tipo_msg, const uint8_t *buffer,
+int envia_buffer_protocolado(int *p_soquete, uint8_t tipo_msg, const uint8_t *buffer,
                              size_t tamanho_buffer, uint8_t *proxima_sequencia);
 
 // Calcula a proxima sequencia circular de 6 bits.

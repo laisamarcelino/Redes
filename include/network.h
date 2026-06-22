@@ -23,10 +23,11 @@
 // allow_loopback: 1 para permitir loopback em testes, 0 para ignorar
 char *seleciona_interface_rede(int allow_loopback);
 int cria_raw_socket(char *nome_interface_rede);
-ssize_t espera_mensagem_servidor(int soquete, unsigned char *buffer, size_t tamanho_buffer);
+ssize_t espera_mensagem_servidor(int *p_soquete, unsigned char *buffer, size_t tamanho_buffer);
 ssize_t envia_mensagem(int soquete, const unsigned char *buffer, size_t tamanho_buffer);
 int fecha_raw_socket(int soquete);
-ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
+ssize_t espera_mensagem_timeout(int *p_soquete, unsigned char *buffer,
                                 size_t tamanho_buffer, int timeout_ms);
+int aguarda_link_e_recria_socket(int *p_soquete);
 
 #endif

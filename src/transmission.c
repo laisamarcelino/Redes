@@ -83,7 +83,7 @@ int envia_ack_nack(int soquete, uint8_t tipo_resposta, uint8_t sequencia)
     return SUCESSO;
 }
 
-int espera_ack_nack_com_timeout(int soquete, uint8_t sequencia_esperada)
+int espera_ack_nack_com_timeout(int *p_soquete, uint8_t sequencia_esperada)
 {
     // Buffer que recebe o pacote de resposta
     uint8_t pacote_resposta[TAMANHO_MAX_PACOTE];
@@ -93,7 +93,7 @@ int espera_ack_nack_com_timeout(int soquete, uint8_t sequencia_esperada)
     {
         // Aguarda uma resposta respeitando o limite de tempo
         ssize_t recebido = espera_mensagem_timeout(
-            soquete,
+            p_soquete,
             pacote_resposta,
             sizeof(pacote_resposta),
             TIMEOUT_ACK_MS);
@@ -176,16 +176,12 @@ int espera_ack_nack_com_timeout(int soquete, uint8_t sequencia_esperada)
  * se timeout: reenvia
  */
 // Envia uma unica mensagem de tamanho maximo 31 bytes
-int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem, uint8_t *proxima_sequencia)
+int envia_pacote_com_reenvio(int *p_soquete, mensagem_t *mensagem, uint8_t *proxima_sequencia)
 {
     // Buffer do pacote montado pelo protocolo
     uint8_t pacote[TAMANHO_MAX_PACOTE];
     size_t tamanho_pacote;
 
-    /* APAGAR
-     * A sequência é definida aqui.
-     * Em caso de reenvio, a mesma sequência é mantida.
-     */
     if (mensagem == NULL || proxima_sequencia == NULL)
     {
         fprintf(stderr, "[ERRO] Parametro nulo em envia_pacote_com_reenvio\n");
@@ -201,20 +197,22 @@ int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem, uint8_t *proxima
         return ERRO;
     }
 
-    // Reenvia indefinidamente ate receber ACK ou ocorrer erro fatal
-    int tentativa = 1;
+    // tentativa_normal conta apenas retransmissoes por NACK ou timeout.
+    // Cable-down (ENETDOWN) aguarda reconexao e nao incrementa este contador.
+    int tentativa_normal = 1;
     while (1)
     {
         uint8_t pacote_envio[TAMANHO_MAX_PACOTE];
         memcpy(pacote_envio, pacote, tamanho_pacote);
 
-        if (tentativa == 1)
+        if (tentativa_normal == 1)
             log_mensagem(label_proprio(), mensagem);
         else
-            log_evento("ERRO %s reenvio seq=%02u tentativa %d",
-                       label_proprio(), mensagem->num_sequencia_msg, tentativa);
+            log_evento("ERRO %s reenvio seq=%02u tentativa %d/%d",
+                       label_proprio(), mensagem->num_sequencia_msg,
+                       tentativa_normal, MAX_TENTATIVAS_REENVIO);
 
-        ssize_t enviado = envia_mensagem(soquete, pacote_envio, tamanho_pacote);
+        ssize_t enviado = envia_mensagem(*p_soquete, pacote_envio, tamanho_pacote);
 
         if (enviado < 0)
         {
@@ -224,10 +222,10 @@ int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem, uint8_t *proxima
             if (errno == ENETDOWN  || errno == ENETUNREACH ||
                 errno == ENXIO     || errno == ENOBUFS)
             {
-                tentativa++;
-                struct timespec ts = { 0, 100000000L };
-                nanosleep(&ts, NULL);
-                continue;
+                aguarda_link_e_recria_socket(p_soquete);
+                log_evento("REDE %s reconectado, reenviando seq=%02u",
+                           label_proprio(), mensagem->num_sequencia_msg);
+                continue;  // nao conta como tentativa normal
             }
 
             perror("envia_mensagem");
@@ -242,7 +240,7 @@ int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem, uint8_t *proxima
             return ERRO;
         }
 
-        int resposta = espera_ack_nack_com_timeout(soquete, mensagem->num_sequencia_msg);
+        int resposta = espera_ack_nack_com_timeout(p_soquete, mensagem->num_sequencia_msg);
 
         if (resposta == MSG_ACK)
         {
@@ -252,16 +250,31 @@ int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem, uint8_t *proxima
 
         if (resposta == MSG_NACK)
         {
-            log_evento("ERRO %s NACK seq=%02u, reenviando",
-                       label_outro(), mensagem->num_sequencia_msg);
-            tentativa++;
+            log_evento("ERRO %s NACK seq=%02u, reenviando (%d/%d)",
+                       label_outro(), mensagem->num_sequencia_msg,
+                       tentativa_normal, MAX_TENTATIVAS_REENVIO);
+            tentativa_normal++;
+            if (tentativa_normal > MAX_TENTATIVAS_REENVIO)
+            {
+                fprintf(stderr, "[ERRO] %d tentativas esgotadas para seq=%u\n",
+                        MAX_TENTATIVAS_REENVIO, mensagem->num_sequencia_msg);
+                return ERRO;
+            }
             continue;
         }
 
         if (resposta == REDE_TIMEOUT)
         {
-            log_evento("ERRO timeout seq=%02u, reenviando", mensagem->num_sequencia_msg);
-            tentativa++;
+            log_evento("ERRO timeout seq=%02u, reenviando (%d/%d)",
+                       mensagem->num_sequencia_msg,
+                       tentativa_normal, MAX_TENTATIVAS_REENVIO);
+            tentativa_normal++;
+            if (tentativa_normal > MAX_TENTATIVAS_REENVIO)
+            {
+                fprintf(stderr, "[ERRO] %d tentativas esgotadas para seq=%u\n",
+                        MAX_TENTATIVAS_REENVIO, mensagem->num_sequencia_msg);
+                return ERRO;
+            }
             continue;
         }
 
@@ -271,7 +284,7 @@ int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem, uint8_t *proxima
 }
 
 // Envia mensagens grandes, separando-as em blocos do tamanho maximo do protocolo
-int envia_buffer_protocolado(int soquete, uint8_t tipo_msg, const uint8_t *buffer,
+int envia_buffer_protocolado(int *p_soquete, uint8_t tipo_msg, const uint8_t *buffer,
                              size_t tamanho_buffer, uint8_t *proxima_sequencia)
 {
     size_t offset = 0;
@@ -314,7 +327,7 @@ int envia_buffer_protocolado(int soquete, uint8_t tipo_msg, const uint8_t *buffe
             tamanho_bloco);
 
         if (envia_pacote_com_reenvio(
-                soquete,
+                p_soquete,
                 &mensagem,
                 proxima_sequencia) != 0)
         {
@@ -333,7 +346,7 @@ int envia_buffer_protocolado(int soquete, uint8_t tipo_msg, const uint8_t *buffe
     fim.tamanho_dados = 0;
 
     if (envia_pacote_com_reenvio(
-            soquete,
+            p_soquete,
             &fim,
             proxima_sequencia) != 0)
     {

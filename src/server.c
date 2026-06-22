@@ -323,7 +323,7 @@ static int salva_arquivo_completo(uint8_t tipo_msg, const uint8_t *buffer, size_
  * fragmentacao do protocolo e controle de ACK/NACK.
  */
 // Gera a visualizacao atual do jogo e envia o mapa completo ao cliente
-static int envia_mapa_completo(int soquete, const jogo_t *jogo)
+static int envia_mapa_completo(int *p_soquete, const jogo_t *jogo)
 {
     char visualizacao[JOGO_VISUALIZACAO_MAX];
     size_t tamanho_visualizacao = 0;
@@ -339,7 +339,7 @@ static int envia_mapa_completo(int soquete, const jogo_t *jogo)
     }
 
     return envia_buffer_protocolado(
-        soquete,
+        p_soquete,
         MSG_VISUALIZACAO,
         (const uint8_t *)visualizacao,
         tamanho_visualizacao,
@@ -362,7 +362,7 @@ static int caminho_arquivo_pastilha(char simbolo, const char **caminho, uint8_t 
 }
 
 // Envia o arquivo de premio da pastilha coletada e zera o campo no jogo.
-static int envia_premio(int soquete, jogo_t *jogo)
+static int envia_premio(int *p_soquete, jogo_t *jogo)
 {
     const char *caminho = NULL;
     uint8_t tipo = MSG_DADOS;
@@ -381,15 +381,15 @@ static int envia_premio(int soquete, jogo_t *jogo)
     }
 
     jogo->ultima_pastilha_coletada = 0;
-    return envia_arquivo_protocolado(soquete, caminho, tipo, &seq);
+    return envia_arquivo_protocolado(p_soquete, caminho, tipo, &seq);
 }
 
 // Envia o arquivo de colisao quando o PacMan encontra um fantasma.
-static int envia_arquivo_colisao(int soquete)
+static int envia_arquivo_colisao(int *p_soquete)
 {
     uint8_t seq = 0;
     return envia_arquivo_protocolado(
-        soquete,
+        p_soquete,
         "pastilhas/colisao.txt",
         MSG_TXT,
         &seq);
@@ -402,22 +402,22 @@ static int envia_arquivo_colisao(int soquete)
  *
  * O cliente sempre espera exatamente essa sequencia, sem timeout.
  */
-static int envia_resposta_completa(int soquete, jogo_t *jogo)
+static int envia_resposta_completa(int *p_soquete, jogo_t *jogo)
 {
     // --- parte 1: arquivo ou sinal de "sem arquivo" ---
     if (jogo->terminou && !jogo->venceu)
     {
         jogo->ultima_pastilha_coletada = 0;
-        envia_arquivo_colisao(soquete);
+        envia_arquivo_colisao(p_soquete);
     }
     else if (jogo->ultima_pastilha_coletada != 0)
     {
-        envia_premio(soquete, jogo);
+        envia_premio(p_soquete, jogo);
     }
     else
     {
         uint8_t seq = 0;
-        envia_buffer_protocolado(soquete, MSG_DADOS, NULL, 0, &seq);
+        envia_buffer_protocolado(p_soquete, MSG_DADOS, NULL, 0, &seq);
     }
 
     // --- parte 2: status do jogo ---
@@ -429,7 +429,7 @@ static int envia_resposta_completa(int soquete, jogo_t *jogo)
                             ? (jogo->venceu ? 1 : 2)
                             : 0);
     uint8_t seq = 0;
-    return envia_pacote_com_reenvio(soquete, &fim, &seq);
+    return envia_pacote_com_reenvio(p_soquete, &fim, &seq);
 }
 
 /* ===================================================================
@@ -475,7 +475,7 @@ int executa_servidor(int soquete, const char *caminho_mapa)
     {
         // Bloqueia ate chegar um pacote PacMan valido na camada de rede
         ssize_t recebido = espera_mensagem_servidor(
-            soquete,
+            &soquete,
             pacote,
             sizeof(pacote));
 
@@ -615,7 +615,7 @@ int executa_servidor(int soquete, const char *caminho_mapa)
                 MSG_ACK,
                 mensagem.num_sequencia_msg);
 
-            if (envia_mapa_completo(soquete, &jogo) != 0)
+            if (envia_mapa_completo(&soquete, &jogo) != 0)
             {
                 free(buffer_recebido);
                 return -1;
@@ -623,7 +623,7 @@ int executa_servidor(int soquete, const char *caminho_mapa)
 
             // Envia FIM_TRANSMISSAO (sem arquivo) + MSG_FIM_JOGO=0 para sincronizar
             // o cliente interativo. Ver envia_resposta_completa.
-            envia_resposta_completa(soquete, &jogo);
+            envia_resposta_completa(&soquete, &jogo);
 
             /* APAGAR
              * O cliente atual inicia a sequencia em 0 a cada execucao.
@@ -672,7 +672,7 @@ int executa_servidor(int soquete, const char *caminho_mapa)
                 log_evento("jogo encerrado: %s",
                            jogo.venceu ? "VITORIA" : "DERROTA por colisao");
 
-            if (envia_mapa_completo(soquete, &jogo) != 0)
+            if (envia_mapa_completo(&soquete, &jogo) != 0)
             {
                 free(buffer_recebido);
                 return -1;
@@ -680,7 +680,7 @@ int executa_servidor(int soquete, const char *caminho_mapa)
 
             // Envia arquivo (premio/colisao) ou sinal vazio + MSG_FIM_JOGO.
             // Ver envia_resposta_completa.
-            envia_resposta_completa(soquete, &jogo);
+            envia_resposta_completa(&soquete, &jogo);
 
             sequencia_esperada = 0;
 

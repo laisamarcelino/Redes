@@ -36,6 +36,7 @@
  */
 static int g_ifindex = 0;
 static unsigned char g_mac_origem[ETH_ALEN];
+static char g_nome_interface[IFNAMSIZ];
 
 // Verifica se uma interface é wireless pelo padrão mais comum de nomes Linux
 static int eh_wireless(const char *nome_interface)
@@ -250,6 +251,8 @@ int cria_raw_socket(char *nome_interface_rede)
         return -1;
     }
     g_ifindex = ifindex;
+    strncpy(g_nome_interface, nome_interface_rede, IFNAMSIZ - 1);
+    g_nome_interface[IFNAMSIZ - 1] = '\0';
 
     // Prepara o endereço da interface escolhida
     struct sockaddr_ll endereco;
@@ -287,7 +290,7 @@ int cria_raw_socket(char *nome_interface_rede)
 }
 
 // Espera um quadro do protocolo PacMan e entrega apenas o payload
-ssize_t espera_mensagem_servidor(int soquete, unsigned char *buffer, size_t tamanho_buffer)
+ssize_t espera_mensagem_servidor(int *p_soquete, unsigned char *buffer, size_t tamanho_buffer)
 {
     unsigned char quadro[TAM_BUFFER_RAW];
     struct sockaddr_ll endereco_origem;
@@ -298,7 +301,7 @@ ssize_t espera_mensagem_servidor(int soquete, unsigned char *buffer, size_t tama
         memset(&endereco_origem, 0, sizeof(endereco_origem));
         tamanho_endereco = sizeof(endereco_origem);
 
-        ssize_t recebido = recvfrom(soquete,
+        ssize_t recebido = recvfrom(*p_soquete,
                                     quadro,
                                     sizeof(quadro),
                                     0,
@@ -312,7 +315,7 @@ ssize_t espera_mensagem_servidor(int soquete, unsigned char *buffer, size_t tama
             if (errno == ENETDOWN  || errno == ENETUNREACH ||
                 errno == ENXIO     || errno == ENOBUFS)
             {
-                { struct timespec ts = { 0, 100000000L }; nanosleep(&ts, NULL); }
+                aguarda_link_e_recria_socket(p_soquete);
                 continue;
             }
             return -1;
@@ -478,7 +481,56 @@ int fecha_raw_socket(int soquete)
     return 0;
 }
 
-ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
+int aguarda_link_e_recria_socket(int *p_soquete)
+{
+    if (p_soquete == NULL)
+        return -1;
+
+    fprintf(stderr, "\n[REDE] Cabo desconectado. Aguardando reconexao...\n");
+
+    if (*p_soquete >= 0)
+    {
+        close(*p_soquete);
+        *p_soquete = -1;
+    }
+
+    while (1)
+    {
+        int tmp = socket(AF_INET, SOCK_DGRAM, 0);
+        if (tmp >= 0)
+        {
+            struct ifreq ifr;
+            memset(&ifr, 0, sizeof(ifr));
+            strncpy(ifr.ifr_name, g_nome_interface, IFNAMSIZ - 1);
+
+            int link_ativo = 0;
+            if (ioctl(tmp, SIOCGIFFLAGS, &ifr) == 0 &&
+                (ifr.ifr_flags & IFF_RUNNING))
+                link_ativo = 1;
+
+            close(tmp);
+            if (link_ativo)
+                break;
+        }
+
+        struct timespec ts = { 0, 500000000L };
+        nanosleep(&ts, NULL);
+    }
+
+    fprintf(stderr, "[REDE] Link restabelecido. Recriando socket...\n");
+
+    int novo = cria_raw_socket(g_nome_interface);
+    if (novo < 0)
+    {
+        fprintf(stderr, "[ERRO] Falha ao recriar socket apos reconexao\n");
+        return -1;
+    }
+
+    *p_soquete = novo;
+    return 0;
+}
+
+ssize_t espera_mensagem_timeout(int *p_soquete, unsigned char *buffer,
                                 size_t tamanho_buffer, int timeout_ms)
 {
     // Buffer temporario para o quadro Ethernet completo
@@ -509,7 +561,7 @@ ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
         // Encerra quando o limite total foi atingido
         if (decorrido >= timeout_ms)
         {
-            limpa_timeout_recebimento(soquete);
+            limpa_timeout_recebimento(*p_soquete);
             return REDE_TIMEOUT;
         }
 
@@ -528,14 +580,14 @@ ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
 
         // Aplica o timeout no socket antes da leitura
         if (setsockopt(
-                soquete,
+                *p_soquete,
                 SOL_SOCKET,
                 SO_RCVTIMEO,
                 &timeout,
                 sizeof(timeout)) == -1)
         {
             perror("setsockopt(SO_RCVTIMEO)");
-            limpa_timeout_recebimento(soquete);
+            limpa_timeout_recebimento(*p_soquete);
             return -1;
         }
 
@@ -545,7 +597,7 @@ ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
 
         // Recebe um quadro Ethernet bruto
         ssize_t recebido = recvfrom(
-            soquete,
+            *p_soquete,
             quadro,
             sizeof(quadro),
             0,
@@ -561,17 +613,18 @@ ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
             if (errno == ENETDOWN  || errno == ENETUNREACH ||
                 errno == ENXIO     || errno == ENOBUFS)
             {
-                { struct timespec ts = { 0, 100000000L }; nanosleep(&ts, NULL); }
+                aguarda_link_e_recria_socket(p_soquete);
+                inicio = timestamp_ms();  // reinicia o timer apos reconexao
                 continue;
             }
 
             if (errno == EAGAIN || errno == EWOULDBLOCK)
             {
-                limpa_timeout_recebimento(soquete);
+                limpa_timeout_recebimento(*p_soquete);
                 return REDE_TIMEOUT;
             }
 
-            limpa_timeout_recebimento(soquete);
+            limpa_timeout_recebimento(*p_soquete);
             return -1;
         }
 
@@ -634,7 +687,7 @@ ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
         if (tamanho_pacote > tamanho_buffer)
         {
             errno = EMSGSIZE;
-            limpa_timeout_recebimento(soquete);
+            limpa_timeout_recebimento(*p_soquete);
             return -1;
         }
 
@@ -642,7 +695,7 @@ ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
         memcpy(buffer, payload, tamanho_pacote);
 
         // Retorna o tamanho real do pacote PacMan
-        limpa_timeout_recebimento(soquete);
+        limpa_timeout_recebimento(*p_soquete);
         return (ssize_t)tamanho_pacote;
     }
 }

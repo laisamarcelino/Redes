@@ -50,7 +50,7 @@ uint8_t tipo_arquivo_por_caminho(const char *caminho)
 
 // Envia um arquivo em blocos protocolados e finaliza a transmissao
 int envia_arquivo_protocolado(
-    int soquete,
+    int *p_soquete,
     const char *caminho_arquivo,
     uint8_t tipo_msg,
     uint8_t *proxima_sequencia)
@@ -97,7 +97,7 @@ int envia_arquivo_protocolado(
             memcpy(mensagem.dados, bloco, lidos);
 
             if (envia_pacote_com_reenvio(
-                    soquete,
+                    p_soquete,
                     &mensagem,
                     proxima_sequencia) != SUCESSO)
             {
@@ -129,7 +129,7 @@ int envia_arquivo_protocolado(
     fim.tamanho_dados = 0;
 
     if (envia_pacote_com_reenvio(
-            soquete,
+            p_soquete,
             &fim,
             proxima_sequencia) != SUCESSO)
     {
@@ -144,7 +144,7 @@ int envia_arquivo_protocolado(
 
 // Recebe blocos protocolados e grava o conteudo no arquivo de saida
 int recebe_arquivo_protocolado(
-    int soquete,
+    int *p_soquete,
     const char *caminho_saida,
     uint8_t tipo_esperado,
     uint8_t *sequencia_esperada)
@@ -180,7 +180,7 @@ int recebe_arquivo_protocolado(
     while (1)
     {
         ssize_t recebido = espera_mensagem_servidor(
-            soquete,
+            p_soquete,
             pacote,
             sizeof(pacote));
 
@@ -209,7 +209,7 @@ int recebe_arquivo_protocolado(
                 pacote[0] == MARCADOR_INICIO)
             {
                 uint8_t sequencia_erro = extrai_sequencia_pacote_bruto(pacote);
-                envia_ack_nack(soquete, MSG_NACK, sequencia_erro);
+                envia_ack_nack(*p_soquete, MSG_NACK, sequencia_erro);
             }
 
             continue;
@@ -225,7 +225,7 @@ int recebe_arquivo_protocolado(
             calcula_sequencia_anterior(*sequencia_esperada))
         {
             envia_ack_nack(
-                soquete,
+                *p_soquete,
                 MSG_ACK,
                 mensagem.num_sequencia_msg);
             continue;
@@ -239,7 +239,7 @@ int recebe_arquivo_protocolado(
                     *sequencia_esperada);
 
             envia_ack_nack(
-                soquete,
+                *p_soquete,
                 MSG_NACK,
                 mensagem.num_sequencia_msg);
             continue;
@@ -248,7 +248,7 @@ int recebe_arquivo_protocolado(
         if (mensagem.tipo_msg == MSG_FIM_TRANSMISSAO)
         {
             envia_ack_nack(
-                soquete,
+                *p_soquete,
                 MSG_ACK,
                 mensagem.num_sequencia_msg);
 
@@ -270,7 +270,7 @@ int recebe_arquivo_protocolado(
                     tipo_esperado);
 
             envia_ack_nack(
-                soquete,
+                *p_soquete,
                 MSG_NACK,
                 mensagem.num_sequencia_msg);
             continue;
@@ -293,7 +293,7 @@ int recebe_arquivo_protocolado(
         }
 
         envia_ack_nack(
-            soquete,
+            *p_soquete,
             MSG_ACK,
             mensagem.num_sequencia_msg);
 
