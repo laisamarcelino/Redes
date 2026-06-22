@@ -6,7 +6,6 @@
 #include <stdint.h>
 
 #define TIMEOUT_ACK_MS 1000
-#define MAX_TENTATIVAS_ENVIO 5
 
 // Envia uma resposta de controle sem payload para confirmar ou negar um pacote.
 int envia_ack_nack(int soquete, uint8_t tipo_resposta, uint8_t sequencia);

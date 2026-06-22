@@ -200,92 +200,64 @@ int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem, uint8_t *proxima
         return ERRO;
     }
 
-    // Repete o envio ate confirmar ou estourar o limite
-    for (int tentativa = 1; tentativa <= MAX_TENTATIVAS_ENVIO; tentativa++)
+    // Reenvia indefinidamente ate receber ACK ou ocorrer erro fatal
+    int tentativa = 1;
+    while (1)
     {
-        // Copia usada nesta tentativa de envio
         uint8_t pacote_envio[TAMANHO_MAX_PACOTE];
-
-        /* APAGAR
-         * Enviamos uma cópia.
-         * Isso ajuda nos testes de corrupção e evita alterar o pacote original.
-         */
-        // Enviamos uma copia para evitar alterar o pacote original
         memcpy(pacote_envio, pacote, tamanho_pacote);
 
         if (tentativa == 1)
             log_mensagem(label_proprio(), mensagem);
         else
-            log_evento("ERRO %s reenvio seq=%02u tentativa %d/%d",
-                       label_proprio(), mensagem->num_sequencia_msg,
-                       tentativa, MAX_TENTATIVAS_ENVIO);
+            log_evento("ERRO %s reenvio seq=%02u tentativa %d",
+                       label_proprio(), mensagem->num_sequencia_msg, tentativa);
 
-        // Envia o pacote pela camada de rede
-        ssize_t enviado = envia_mensagem(
-            soquete,
-            pacote_envio,
-            tamanho_pacote);
+        ssize_t enviado = envia_mensagem(soquete, pacote_envio, tamanho_pacote);
 
-        // Trata erros de envio e interrupcoes
         if (enviado < 0)
         {
             if (errno == EINTR)
-            {
-                tentativa--;
                 continue;
-            }
 
             perror("envia_mensagem");
             return ERRO;
         }
 
-        // Confere se o envio foi completo
         if ((size_t)enviado != tamanho_pacote)
         {
             fprintf(stderr,
                     "[ERRO] Envio incompleto. Enviado: %zd, esperado: %zu\n",
-                    enviado,
-                    tamanho_pacote);
+                    enviado, tamanho_pacote);
             return ERRO;
         }
 
-        // Espera resposta referente a mesma sequencia
-        int resposta = espera_ack_nack_com_timeout(
-            soquete,
-            mensagem->num_sequencia_msg);
+        int resposta = espera_ack_nack_com_timeout(soquete, mensagem->num_sequencia_msg);
 
-        // ACK libera o proximo numero de sequencia
         if (resposta == MSG_ACK)
         {
             *proxima_sequencia = calcula_proxima_sequencia(*proxima_sequencia);
             return SUCESSO;
         }
 
-        // NACK faz repetir a mesma sequencia
         if (resposta == MSG_NACK)
         {
             log_evento("ERRO %s NACK seq=%02u, reenviando",
                        label_outro(), mensagem->num_sequencia_msg);
+            tentativa++;
             continue;
         }
 
-        // Timeout tambem faz repetir a mesma sequencia
         if (resposta == REDE_TIMEOUT)
         {
             log_evento("ERRO timeout seq=%02u, reenviando", mensagem->num_sequencia_msg);
+            tentativa++;
             continue;
         }
 
         fprintf(stderr, "[ERRO] Falha inesperada esperando ACK/NACK\n");
         return ERRO;
     }
-
-    // Todas as tentativas foram consumidas
-    fprintf(stderr,
-            "[ERRO] Número máximo de tentativas atingido para seq=%u\n",
-            mensagem->num_sequencia_msg);
-
-    return ERRO;
 }
 
 // Envia mensagens grandes, separando-as em blocos do tamanho maximo do protocolo
