@@ -18,6 +18,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <sys/time.h>
+#include <time.h>
 
 /* ===================================================================
                          FUNÇÕES AUXILIARES
@@ -306,10 +307,14 @@ ssize_t espera_mensagem_servidor(int soquete, unsigned char *buffer, size_t tama
 
         if (recebido < 0)
         {
-            if (errno == EINTR   || errno == ENETDOWN  ||
-                errno == ENETUNREACH || errno == ENXIO ||
-                errno == ENOBUFS)
+            if (errno == EINTR)
                 continue;
+            if (errno == ENETDOWN  || errno == ENETUNREACH ||
+                errno == ENXIO     || errno == ENOBUFS)
+            {
+                { struct timespec ts = { 0, 100000000L }; nanosleep(&ts, NULL); }
+                continue;
+            }
             return -1;
         }
 
@@ -550,10 +555,13 @@ ssize_t espera_mensagem_timeout(int soquete, unsigned char *buffer,
         // Trata timeout, interrupcao e erro de rede
         if (recebido < 0)
         {
-            if (errno == EINTR   || errno == ENETDOWN  ||
-                errno == ENETUNREACH || errno == ENXIO ||
-                errno == ENOBUFS)
+            if (errno == EINTR)
+                continue;
+
+            if (errno == ENETDOWN  || errno == ENETUNREACH ||
+                errno == ENXIO     || errno == ENOBUFS)
             {
+                { struct timespec ts = { 0, 100000000L }; nanosleep(&ts, NULL); }
                 continue;
             }
 

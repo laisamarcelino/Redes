@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #define SUCESSO 0
 #define ERRO -1
@@ -217,11 +218,15 @@ int envia_pacote_com_reenvio(int soquete, mensagem_t *mensagem, uint8_t *proxima
 
         if (enviado < 0)
         {
-            if (errno == EINTR   || errno == ENETDOWN  ||
-                errno == ENETUNREACH || errno == ENXIO ||
-                errno == ENOBUFS)
+            if (errno == EINTR)
+                continue;
+
+            if (errno == ENETDOWN  || errno == ENETUNREACH ||
+                errno == ENXIO     || errno == ENOBUFS)
             {
                 tentativa++;
+                struct timespec ts = { 0, 100000000L };
+                nanosleep(&ts, NULL);
                 continue;
             }
 
