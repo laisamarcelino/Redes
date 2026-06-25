@@ -19,7 +19,7 @@
                          FUNÇÕES AUXILIARES
 ======================================================================*/
 
-#define TIMEOUT_RESPOSTA_MS 1000
+#define TIMEOUT_RESPOSTA_MS 5000
 #define PASTA_RECEBIDOS "recebidos"
 
 static uint8_t proxima_sequencia_cliente = 0;

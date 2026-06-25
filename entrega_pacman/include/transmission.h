@@ -6,7 +6,7 @@
 #include <stdint.h>
 
 #define MAX_TENTATIVAS_REENVIO 10
-#define TIMEOUT_ESPERA_RESPOSTA_MS 3000
+#define TIMEOUT_ESPERA_RESPOSTA_MS 300
 
 int envia_ack_nack(int soquete, uint8_t tipo_resposta, uint8_t sequencia);
 
