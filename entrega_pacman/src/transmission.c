@@ -83,7 +83,7 @@ int envia_ack_nack(int soquete, uint8_t tipo_resposta, uint8_t sequencia)
     return SUCESSO;
 }
 
-/* Aguarda indefinidamente um ACK ou NACK com o número de sequência esperado */
+/* Aguarda ACK ou NACK com o número de sequência esperado, com timeout para permitir reenvio */
 int espera_ack_nack(int *p_soquete, uint8_t sequencia_esperada)
 {
     uint8_t pacote_resposta[TAMANHO_MAX_PACOTE];
@@ -91,10 +91,16 @@ int espera_ack_nack(int *p_soquete, uint8_t sequencia_esperada)
 
     while (1)
     {
-        ssize_t recebido = espera_mensagem_servidor(
+        ssize_t recebido = espera_mensagem_timeout(
             p_soquete,
             pacote_resposta,
-            sizeof(pacote_resposta));
+            sizeof(pacote_resposta),
+            TIMEOUT_ESPERA_RESPOSTA_MS);
+
+        if (recebido == REDE_TIMEOUT)
+        {
+            return REDE_TIMEOUT;
+        }
 
         if (recebido < 0)
         {
@@ -103,7 +109,7 @@ int espera_ack_nack(int *p_soquete, uint8_t sequencia_esperada)
                 continue;
             }
 
-            perror("espera_mensagem_servidor");
+            perror("espera_mensagem_timeout");
             return ERRO;
         }
 
@@ -117,8 +123,8 @@ int espera_ack_nack(int *p_soquete, uint8_t sequencia_esperada)
                 (size_t)recebido,
                 &resposta) != 0)
         {
-            fprintf(stderr, "[ERRO] Cliente recebeu pacote invalido\n");
-            return ERRO;
+            fprintf(stderr, "[ERRO] Pacote invalido recebido enquanto esperava ACK/NACK\n");
+            continue;
         }
 
         // Respostas atrasadas de outra sequência são ignoradas para evitar confirmar pacote errado.
@@ -217,6 +223,21 @@ int envia_pacote_com_reenvio(int *p_soquete, mensagem_t *mensagem, uint8_t *prox
         {
             log_evento("ERRO %s NACK seq=%02u, reenviando (%d/%d)",
                        label_outro(), mensagem->num_sequencia_msg,
+                       tentativa_normal, MAX_TENTATIVAS_REENVIO);
+            tentativa_normal++;
+            if (tentativa_normal > MAX_TENTATIVAS_REENVIO)
+            {
+                fprintf(stderr, "[ERRO] %d tentativas esgotadas para seq=%u\n",
+                        MAX_TENTATIVAS_REENVIO, mensagem->num_sequencia_msg);
+                return ERRO;
+            }
+            continue;
+        }
+
+        if (resposta == REDE_TIMEOUT)
+        {
+            log_evento("ERRO %s timeout seq=%02u, reenviando (%d/%d)",
+                       label_proprio(), mensagem->num_sequencia_msg,
                        tentativa_normal, MAX_TENTATIVAS_REENVIO);
             tentativa_normal++;
             if (tentativa_normal > MAX_TENTATIVAS_REENVIO)
